@@ -44,10 +44,10 @@ M5StickC Plus + Wi-SUNモジュール BP35A1 で、家庭のスマートメー�
 
 ## 2. 使用機器
 
-- 親機：M5StickC Plus (¥3,564) --> [スイッチサイエンス](https://www.switch-science.com/catalog/6470/)
-- 子機：M5Stack Basic (¥5,874) --> [スイッチサイエンス](https://www.switch-science.com/catalog/7362/)  
-- BP35A1 モジュール (¥8,620) --> [チップワンストップ](https://www.chip1stop.com/view/searchResult/SearchResultTop?classCd=&did=&cid=netcompo&keyword=BP35A1&utm_source=netcompo&utm_medium=buyNow)
-- Wi-SUN HAT (¥1,650) --> [スイッチサイエンス](https://www.switch-science.com/catalog/7612/)
+- 親機：M5StickC Plus --> [スイッチサイエンス](https://www.switch-science.com/catalog/6470/)
+- 子機：M5Stack Basic --> [スイッチサイエンス](https://www.switch-science.com/catalog/7362/)  
+- BP35A1 モジュール --> [チップワンストップ](https://www.chip1stop.com/view/searchResult/SearchResultTop?classCd=&did=&cid=netcompo&keyword=BP35A1&utm_source=netcompo&utm_medium=buyNow)
+- Wi-SUN HAT --> [スイッチサイエンス](https://www.switch-science.com/catalog/7612/)
 
 ※ M5Stick および M5Stack を電源に繋いで長期運用する場合は、バッテリーを撤去した方が安心かもしれません。  
 ※ 親機だけでも動きますが、子機を追加することで、より多様なデータ表示が実現できます。  
