@@ -1,6 +1,8 @@
 # SMM3 : Smart Meter Monitor v.3
 M5Stackで電力使用量を「見える化」して電気代を節約しよう！
 
+![IMG_1441](https://github.com/yonmas/SMM3-SmartMeterMonitoring_v3/assets/104808539/29bea204-5a9e-4c39-af05-7f5d8ffc9a89)
+
 ## 0. 最低限の手順
 
 **「[細かいこと](https://docs.google.com/spreadsheets/d/1qYsY8ZOpj6FxqoebCQnvBFYSL8rCK7r_A7R3m9bF7MY/edit#gid=158599453)」** はいいから、とりあえず使ってみたいという場合は、以下の手順で。
