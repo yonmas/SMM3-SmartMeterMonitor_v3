@@ -7,8 +7,7 @@
 
 **「[細かいこと](https://docs.google.com/spreadsheets/d/1qYsY8ZOpj6FxqoebCQnvBFYSL8rCK7r_A7R3m9bF7MY/edit#gid=158599453)」** はいいから、とりあえず使ってみたいという場合は、以下の手順で。
 
-1. M5StickC Plus + BP35A1 の組み込みは完了しているものとします。  
-1. M5Stack Basic のファームは、**V1.10.2** 以降としてください。
+1. M5Stack Basic と M5StickC Plus を準備して、M5StickC Plus に BP35A1 を組み込んでください。M5Stack Basic のファームは、**V1.10.2** 以降としてください。
 1. **[4.ファイル構成]** に従って、必要なファイルを M5Stack/M5StickC にインストールしてください。  
 1. **[5.初期設定]** に従って、機器の初期設定を行ってください。
 
