@@ -1,0 +1,6 @@
+{
+  "API_KEY": "【必須】設定用GSSのAPI_KEY",
+  "SPREADSHEET_ID": "【必須】設定用GSSのシートID",
+  "SHEET_AREA_M": "config!B3:O30",
+  "SHEET_AREA_S": "config!B32:O46"
+}

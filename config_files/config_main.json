@@ -1,0 +1,21 @@
+{
+  "B_ID": "【必須】BルートのID(半角32文字)",
+  "B_PASSWORD": "【必須】Bルートのパスワード(半角12文字)",
+  "A_ID": "*",
+  "A_KEY": "*",
+  "A_INTERVAL": 30,
+  "CONTRACT_AMPERAGE": 40,
+  "WARNING_AMPERAGE": 30,
+"COLLECT_MONTH": [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+  "COLLECT_CALENDER": ['', '', '', '', '', '', '', '', '', '', '', '', ''],
+  "COLLECT_DATE": 15,
+  "CHARGE_FUNC": "tepco",
+  "BASE": 1180.96,
+  "RATE1": 30.0,
+  "RATE2": 36.6,
+  "RATE3": 40.69,
+  "SAIENE": 0,
+  "NENCHO": 0,
+  "TIMEOUT_MAIN": 30,
+  "LOG_LEVEL": "INFO"
+}
