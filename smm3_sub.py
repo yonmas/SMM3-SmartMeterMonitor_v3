@@ -828,18 +828,18 @@ if __name__ == '__main__':
             # # 'UNIT' 積算電力量-[単位x係数]をリクエスト  << unit*coefficient を取得する場合
             # if unit is None:
             #     espnow.broadcast(data='UNIT')
-            #     logger.info('[UNIT] Sent Request UNIT')
+            #     logger.info('[UNIT] >> Request UNIT')
 
             # 'REQ' 積算電力量-履歴データをリクエスト
             if (sum(hist_flag) < (data_period + 1)):  # and unit:
                 espnow.broadcast(data='REQ'+'{:02}'.format(hist_day))
-                logger.debug('[SENT] Key = [REQ%2d]', hist_day)
+                logger.debug('[SENT] >> Key = [REQ%2d]', hist_day)
 
             # # 'UNIT' 積算電力量-[単位x係数]をリクエスト
             # if unit is None:
             #     if request_UNIT is False:
             #         espnow.broadcast(data='UNIT')
-            #         logger.info('[UNIT] Sent Request UNIT')
+            #         logger.info('[UNIT] >> Request UNIT')
             #         request_UNIT = True
 
             # 親機からデータを受信(ESP NOW)
@@ -850,7 +850,7 @@ if __name__ == '__main__':
                 r_key = str(d[2][:4].decode().strip())  # 先頭4文字が key
                 r_data = d[2][4:].strip()
 
-                logger.debug('[RECV] Key = [%s]', r_key)
+                logger.debug('[RECV] << Key = [%s]', r_key)
 
                 # 親機起動時処理 : 履歴データ再取得
                 if r_key == 'BOOT':
@@ -866,7 +866,7 @@ if __name__ == '__main__':
                 # # 積算電力量-[単位x係数]受信処理  << unit*coefficient を取得する場合
                 # elif r_key == 'UNT=':
                 #     unit = float(r_data.decode())
-                #     logger.info('[UNIT] Received UNIT = %s', unit)
+                #     logger.info('[UNIT] << UNIT = %s', unit)
                 #     request_UNIT = False
 
                 # 積算電力量-履歴データ受信処理
@@ -900,12 +900,12 @@ if __name__ == '__main__':
                             if id - day_shift < data_period:
                                 hist_data[id-day_shift+1][48] = hist_data[id-day_shift][0]
 
-                            logger.info('[HIST] = [(%d-%d) %s %s [%s %.1f - %.1f : %.1f]]'
+                            logger.info('[HIST] << [(%d-%d) %s %s [%s %.1f - %.1f : %.1f]]'
                                   ,id, day_shift, data_date, data_time, hist_date[id-day_shift],
                                   hist_data[id-day_shift][0] / 1000,
                                   hist_data[id-day_shift][47] / 1000,
                                   hist_data[id-day_shift][48] / 1000)
-                            logger.debug('[HIST] Raw = %s', hist_data[id-day_shift])
+                            logger.debug('[HIST] << Raw = %s', hist_data[id-day_shift])
 
                             draw_page[page]()  # ページ再描画
                             draw_cumul()
@@ -928,7 +928,7 @@ if __name__ == '__main__':
                     e_energy = float(cumul_data[3])  # 今月の電力量(cumul_dateまで)
                     charge = cumul_data[4]  # 今月の電気料金(cumul_dateまで)
 
-                    logger.info('[CUML] = %s', cumul_data)
+                    logger.info('[CUML] << %s', cumul_data)
 
                     # 日跨ぎ処理
                     if TIME_TB.index(cumul_time) == 0:
@@ -960,7 +960,7 @@ if __name__ == '__main__':
                     inst_mode = 'good'
 
                     draw_w_a()
-                    logger.info('[INST] = %s', inst_data)
+                    logger.info('[INST] << %s', inst_data)
 
             utime.sleep(1)
             gc.collect()

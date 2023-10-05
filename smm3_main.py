@@ -296,7 +296,7 @@ def send_unit(unit_flag, unit_count):
     if unit_flag is False:
         espnow.broadcast(data=str('UNT=' + str(unit*coefficient)))
         unit_flag = True
-        logger.info('[SEND] UNIT = %.1f', unit*coefficient)
+        logger.info('[UNIT] >> %.1f', unit*coefficient)
     else:
         unit_count += 1
         logger.debug('[UNIT] Skip UNIT Request: counter = %d', unit_count)
@@ -321,9 +321,9 @@ def send_hist(hist_flag, unit_flag, unit_count, n):
                 _hist_data_47 = round(int(_hist_data[-8:], 16) * unit*coefficient, 1)
             else:
                 _hist_data_47 = 0.0
-            logger.info('[SEND] HIST(%d) = [%s, [%s - %s]]', n, hist_data[4:23].decode('utf-8'),
+            logger.info('[HIST] >> (%d) = [%s, [%s - %s]]', n, hist_data[4:23].decode('utf-8'),
                         str(_hist_data_00), str(_hist_data_47))
-            logger.debug('[SEND] HIST_Raw(%d) = [%s]', n, _hist_data)
+            logger.debug('[HIST] >> Raw(%d) = [%s]', n, _hist_data)
             
         except Exception as e:
             logger.error('[HIST] %s', e)
@@ -341,7 +341,7 @@ def send_hist(hist_flag, unit_flag, unit_count, n):
 
 # 【send】 積算電力量　取得 ＆ 表示 & 子機送信
 def send_cumul():
-    logger.info('[CUML] == Monthly e-Energy & Monthly Charge ==')
+    logger.debug('\n[CUML] == Monthly e-Energy & Monthly Charge ==')
 
     result = False
     _collect = collect
@@ -358,7 +358,7 @@ def send_cumul():
         CUML = str('CUML' + str(_e_energy) + '/' + str(_created) + '/' + str(_collect) + '/'
                    + str(_monthly_e_energy) + '/' + str(_charge))
         espnow.broadcast(data=CUML)
-        logger.info('[SEND] CUML = [%s]', str(CUML))
+        logger.info('[CUML] >> [%s]', str(CUML))
 
         result = True
 
@@ -370,7 +370,7 @@ def send_cumul():
 
 # 【send】 瞬時電力・瞬時電流　取得 ＆ 表示 ＆ 子機送信
 def send_inst():
-    logger.info('[INST] == Wattage & Amperage ==')
+    logger.debug('\n[INST] == Wattage & Amperage ==')
 
     result = False
     _wattage = wattage
@@ -384,7 +384,7 @@ def send_inst():
 
         # 子機送信：瞬時電力、瞬時電力発信
         espnow.broadcast(data=str('INST' + str(_wattage) + '/' + str(_amperage)))
-        logger.info('[SEND] INST = [%s , %s]', str(_wattage), str(_amperage))
+        logger.info('[INST] >> [%s , %s]', str(_wattage), str(_amperage))
 
         result = True
 
@@ -507,7 +507,7 @@ if __name__ == '__main__':
             d = espnow.recv_data()
             key = str(d[2].decode())
             if key != '':
-                logger.info('[RECV] Key = [%s]', key)
+                logger.info('[RECV] << Key = [%s]', key)
 
             # # << unit*coefficient を子機に送信する場合
             # # 'UNIT' 積算電力量-[単位x係数]のリクエストに応答
@@ -584,15 +584,16 @@ if __name__ == '__main__':
 
             # 動作確認：Ping every 1 hour
             if (utime.time()-ping_time) >= (60*60):
+                logger.info('[SYS_] Ping BP35A1')
                 bp35a1.skPing()
                 ping_time= utime.time()
 
             utime.sleep(1)
-            # print('mem =', gc.mem_free())
+            # print('[SYS_] mem_free = {} byte'.format(gc.mem_free()))
 
     except Exception as e:
-        logger.info(e)
+        logger.error('[ERR.] == Final Exception ==: %s', e)
 
     finally:
-        logger.info('== system reset ==')
+        logger.info('[SYS_] == system reset ==')
         machine.reset()
