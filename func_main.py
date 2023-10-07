@@ -1,9 +1,8 @@
-from m5stack import *
+from m5stack import lcd, speaker, btnA
 import uos
 import ujson
 import utime
 import urequests
-import ujson
 import logging
 import sys
 
@@ -221,6 +220,6 @@ def set_config(config):
 
     # 月ごとの検針日指定がなければ、既定値を使用する
     if '' in config['COLLECT_CALENDER']:
-        config['COLLECT_CALENDER'] = [config['COLLECT_DATE']]*13
+        config['COLLECT_CALENDER'] = [config['COLLECT_DATE']] * 13
 
     return config, TIMEOUT_MAIN, WARNING_AMPERAGE, CONTRACT_AMPERAGE

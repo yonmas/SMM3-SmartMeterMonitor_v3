@@ -1,9 +1,8 @@
-from m5stack import *
+from m5stack import lcd, speaker, btnA
 import uos
 import ujson
 import utime
 import urequests
-import ujson
 import logging
 
 # 設定ファイル名
@@ -123,11 +122,11 @@ def get_api_config():
                 clear_api()  # スプレッドシートの情報を消去
         except Exception:
             # if api_source == 'file':
-                # try:
-                #     uos.remove(API_CONFIG_FILE)  #
-                #     status('API_file removed !', color=0xff8000)
-                # except Exception:
-                #     pass
+            #     try:
+            #         uos.remove(API_CONFIG_FILE)  #
+            #         status('API_file removed !', color=0xff8000)
+            #         except Exception:
+            #         pass
             api_config = None
 
     else:

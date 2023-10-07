@@ -1,4 +1,4 @@
-from m5stack import *
+from m5stack import lcd, btnA
 import binascii
 import espnow
 import logging
@@ -33,7 +33,7 @@ config = {
     'NENCHO': 0,
     'TIMEOUT_MAIN': 30,
     'LOG_LEVEL': 'INFO',  # 'CRITICAL', 'ERROR', 'WARNING', 'INFO', 'DEBUG'
-    }
+}
 
 # Global variables #
 logger = None               # Logger object
@@ -61,7 +61,7 @@ colormap = (
     0x7f7f7f,  # tab:gray
     0xbcbd22,  # tab:olive
     0x17becf,  # tab:cyan
-    )
+)
 
 bgcolor = 0x000000    # Background color
 uncolor = 0xa0a0a0    # Unit color
@@ -100,10 +100,10 @@ def checkWiFi(arg):
 def progress(percent):
     (w, h) = lcd.screensize()
     x = (w - 6) * percent // 100
-    lcd.rect(3, h-12, x, 12, bgcolor, color1)
-    lcd.rect(3+x, h-12, w-6, 12, bgcolor, bgcolor)
+    lcd.rect(3, h - 12, x, 12, bgcolor, color1)
+    lcd.rect(3 + x, h - 12, w - 6, 12, bgcolor, bgcolor)
     lcd.font(lcd.FONT_DefaultSmall, transparent=True)
-    lcd.text(lcd.CENTER, h-10, '{}%'.format(percent), uncolor)
+    lcd.text(lcd.CENTER, h - 10, '{}%'.format(percent), uncolor)
 
 
 # 【draw】　メイン画面表示
@@ -133,9 +133,9 @@ def draw_wattage(wattage):
     else:
         wattage = str(int(wattage))
     lcd.font(lcd.FONT_DejaVu40)
-    lcd.print(wattage, x+w-20 - lcd.textWidth(wattage), y+5, fc)
+    lcd.print(wattage, x + w - 20 - lcd.textWidth(wattage), y + 5, fc)
     lcd.font(lcd.FONT_DejaVu18)
-    lcd.print('W', lcd.LASTX, y+(h-18), uncolor)
+    lcd.print('W', lcd.LASTX, y + (h - 18), uncolor)
 
 
 # 【draw】　瞬時電流計測値の表示
@@ -156,15 +156,15 @@ def draw_amperage(amperage):
     else:
         amperage = str(int(amperage))
     lcd.font(lcd.FONT_DejaVu40)
-    lcd.print(amperage, x+51-lcd.textWidth(amperage), y+5, fc)
+    lcd.print(amperage, x + 51 - lcd.textWidth(amperage), y + 5, fc)
     lcd.font(lcd.FONT_DejaVu18)
-    lcd.print('A', lcd.LASTX, y+(h-18), uncolor)
+    lcd.print('A', lcd.LASTX, y + (h - 18), uncolor)
 
     CONTRACT_AMPERAGE = str(int(config['CONTRACT_AMPERAGE']))
     lcd.font(lcd.FONT_DejaVu24)
-    lcd.print(CONTRACT_AMPERAGE, x+65, y+(h-24), uncolor)
+    lcd.print(CONTRACT_AMPERAGE, x + 65, y + (h - 24), uncolor)
     lcd.font(lcd.FONT_DejaVu18)
-    lcd.print('A', lcd.LASTX, y+(h-18), uncolor)
+    lcd.print('A', lcd.LASTX, y + (h - 18), uncolor)
 
 
 # 【draw】　今月（検針日を起点）の日付範囲を表示
@@ -174,7 +174,7 @@ def draw_collect_range(collect, created):
 
     s = '{}~{}'.format(collect[5:10], created[5:10])
     lcd.font(lcd.FONT_DejaVu18)
-    lcd.print(s, int(x + (w-lcd.textWidth(s))/2), y+5, uncolor)
+    lcd.print(s, int(x + (w - lcd.textWidth(s)) / 2), y + 5, uncolor)
 
 
 # 【draw】　今月（検針日を起点）の電力量の表示
@@ -187,9 +187,9 @@ def draw_monthly_e_energy(monthly_e_energy):
     else:
         monthly_e_energy = str(int(monthly_e_energy))
     lcd.font(lcd.FONT_DejaVu40)
-    lcd.print(monthly_e_energy, x+w - lcd.textWidth(monthly_e_energy)-15, y+5, color2)
+    lcd.print(monthly_e_energy, x + w - lcd.textWidth(monthly_e_energy) - 15, y + 5, color2)
     lcd.font(lcd.FONT_DejaVu18)
-    lcd.print('kWh', x+w - lcd.textWidth('kWh')-15, y+40, uncolor)
+    lcd.print('kWh', x + w - lcd.textWidth('kWh') - 15, y + 40, uncolor)
 
 
 # 【draw】　今月（検針日を起点）の電気料金の表示
@@ -202,9 +202,9 @@ def draw_monthly_charge(charge):
     else:
         charge = str(int(charge))
     lcd.font(lcd.FONT_DejaVu40)
-    lcd.print(charge, x+w - lcd.textWidth(charge), y+5, color2)
+    lcd.print(charge, x + w - lcd.textWidth(charge), y + 5, color2)
     lcd.font(lcd.FONT_DejaVu18)
-    lcd.print('Yen', x+w - lcd.textWidth('Yen'), y+40, uncolor)
+    lcd.print('Yen', x + w - lcd.textWidth('Yen'), y + 40, uncolor)
 
 
 # 【draw】　TIMEOUT_MAIN秒以上、スマートメーターからのデータが途切れた場合は文字色をグレー表示
@@ -220,7 +220,8 @@ def check_timeout(inst_time):
 # 【exec】　積算電力量-履歴データを取得
 def get_hist_data(n):
     (created, history_of_e_energy) = bp35a1.get_hist_cumul_e_energy(n)
-    hist_data = bytes('ID{:02}{}'.format(n, created), 'UTF-8') + binascii.unhexlify(history_of_e_energy)
+    hist_data = (bytes('ID{:02}{}'.format(n, created), 'UTF-8')
+                 + binascii.unhexlify(history_of_e_energy))
     return hist_data
 
 
@@ -264,7 +265,7 @@ def set_instance(config):
         beep()
         utime.sleep(30)
         sys.exit()
-    
+
     logger.info('[INIT] Charge Function: %s', calc_charge_func.__name__)
 
     logger.setLevel(eval('logging.{}'.format(config['LOG_LEVEL'])))
@@ -294,9 +295,9 @@ def reload_config(config):
 # 【send】 'UNIT' 積算電力量-[単位x係数]のリクエストに応答
 def send_unit(unit_flag, unit_count):
     if unit_flag is False:
-        espnow.broadcast(data=str('UNT=' + str(unit*coefficient)))
+        espnow.broadcast(data=str('UNT=' + str(unit * coefficient)))
         unit_flag = True
-        logger.info('[UNIT] >> %.1f', unit*coefficient)
+        logger.info('[UNIT] >> %.1f', unit * coefficient)
     else:
         unit_count += 1
         logger.debug('[UNIT] Skip UNIT Request: counter = %d', unit_count)
@@ -316,15 +317,15 @@ def send_hist(hist_flag, unit_flag, unit_count, n):
             espnow.broadcast(data=hist_data)
             hist_flag[n] += 1
             _hist_data = binascii.hexlify(hist_data[23:]).decode('utf-8')
-            _hist_data_00 = round(int(_hist_data[:8], 16) * unit*coefficient, 1)
+            _hist_data_00 = round(int(_hist_data[:8], 16) * unit * coefficient, 1)
             if int(_hist_data[-8:], 16) <= 0x05f5e0ff:
-                _hist_data_47 = round(int(_hist_data[-8:], 16) * unit*coefficient, 1)
+                _hist_data_47 = round(int(_hist_data[-8:], 16) * unit * coefficient, 1)
             else:
                 _hist_data_47 = 0.0
             logger.info('[HIST] >> (%d) = [%s, [%s - %s]]', n, hist_data[4:23].decode('utf-8'),
                         str(_hist_data_00), str(_hist_data_47))
             logger.debug('[HIST] >> Raw(%d) = [%s]', n, _hist_data)
-            
+
         except Exception as e:
             logger.error('[HIST] %s', e)
             hist_flag[n] = 0
@@ -401,12 +402,10 @@ def send_ambient():
 
     try:
         if ambient_client:
-            a_result = ambient_client.send({
-                            'd1': amperage,
-                            'd2': wattage,
-                            'd3': monthly_e_energy,
-                            'd4': charge
-                        })
+            a_result = ambient_client.send({'d1': amperage,
+                                            'd2': wattage,
+                                            'd3': monthly_e_energy,
+                                            'd4': charge})
 
             result = True
 
@@ -426,27 +425,18 @@ if __name__ == '__main__':
         logger = logging.getLogger(logger_name)
         logger.setLevel(logging.INFO)  # 初期値 INFO
 
-        # Initialize lcd
-        lcd.clear()
-
-        # WiFi 設定
+        # WiFi　&ESP-NOW 設定
         lcd.orient(lcd.PORTRAIT_FLIP)
         wifiCfg.autoConnect(lcdShow=True)
-        if not wifiCfg.is_connected():
-            raise Exception('Can not connect to WiFi.')
-        lcd.clear()
-        lcd.orient(orient)
+        wifiCfg.wlan_ap.active(True)
+        espnow.init(0)
 
         # Start checking the WiFi connection
         machine.Timer(0).init(period=60 * 1000, mode=machine.Timer.PERIODIC, callback=checkWiFi)
 
-        # ESP-NOW 設定
-        espnow.init(0)
-        status('ESP NOW init', uncolor)
-
-        # RTC設定（時刻設定）
-        status('Set Time', uncolor)
-        ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)
+        lcd.clear()
+        lcd.orient(orient)
+        status('Welcome to SMM3 !', uncolor)
 
         # 定数の読み込み（ファイル、Googleスプレッドシート）
         status('Load configuration', uncolor)
@@ -457,11 +447,14 @@ if __name__ == '__main__':
         config, TIMEOUT_MAIN, WARNING_AMPERAGE, CONTRACT_AMPERAGE = cnfg.set_config(config)
         set_instance(config)
 
-        # ボタン検出スレッド起動
+        # RTC設定（時刻設定）
+        status('Set Time', uncolor)
+        ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)
 
+        # ボタン検出スレッド起動
         # Aボタン       スクリーン上下反転
         # Aボタン長押し  GSS から config リロード
-        
+
         btnA.wasReleased(flip_lcd_orientation)
         btnA.pressFor(0.8, lambda config=config: reload_config(config))
 
@@ -479,21 +472,29 @@ if __name__ == '__main__':
         utime.sleep(0.1)
         # espnow.broadcast(data=str('UNT=' + str(unit*coefficient)))
 
+        # データ取得処理
+        hist_flag = [1] * (data_period + 2)
+        cumul_flag = False
+
         # << unit*coefficient を子機に送信する場合
         unit_flag = True
         unit_count = 0
 
-        hist_flag = [1] * (data_period+2)
-        cumul_flag = False
+        # 表示値初期値
+        wattage = 0
+        amperage = 0
+        monthly_e_energy = 0
+        charge = 0
+        collect = '****-**-** **:**:**'
+        created = '****-**-** **:**:**'
 
-        wattage = amperage = monthly_e_energy = charge = 0
-        created = collect = '****-**-** **:**:**'
-
+        # タイマー処理
         inst_time = utime.time() - 120  # INST タイマー
         cumul_time = utime.time() - 120  # CUML タイマー
         ambient_time = utime.time() - 120  # Ambient タイマー
         ping_time = utime.time() - 120  # ping タイマー
 
+        # 画面初期化
         lcd.clear()
         draw_main()
         # status('Please wait a moment.', uncolor)
@@ -519,7 +520,7 @@ if __name__ == '__main__':
             if key.startswith('REQ'):
                 n = int(key[3:5])
                 if (n == 0) and (hist_flag[1] != 0) and (unit_flag is True):
-                    hist_flag = [0] * (data_period+2)
+                    hist_flag = [0] * (data_period + 2)
                     cumul_flag = False
                     cumul_time = utime.time() - 120
                     # unit_flag = False
@@ -530,8 +531,8 @@ if __name__ == '__main__':
             check_timeout(inst_time)  # スマートメーターからのデータのタイムアウト判定
 
             # 積算電力量　取得 ＆ 表示 & 子機送信：Updated every 10 minutes
-            if (((utime.localtime()[4] % 10 == 0) and (utime.time()-cumul_time >= 60))
-                or ((cumul_flag is False) and (utime.time()-cumul_time >= 60))):
+            if (((utime.localtime()[4] % 10 == 0) and (utime.time() - cumul_time >= 60))
+                    or ((cumul_flag is False) and (utime.time() - cumul_time >= 60))):
                 utime.sleep(3)
                 cumul_flag = False
                 collect, created, monthly_e_energy, charge, result = send_cumul()
@@ -583,10 +584,10 @@ if __name__ == '__main__':
                     retries += 1
 
             # 動作確認：Ping every 1 hour
-            if (utime.time()-ping_time) >= (60*60):
+            if (utime.time() - ping_time) >= (60 * 60):
                 logger.info('[SYS_] Ping BP35A1')
                 bp35a1.skPing()
-                ping_time= utime.time()
+                ping_time = utime.time()
 
             utime.sleep(1)
             # print('[SYS_] mem_free = {} byte'.format(gc.mem_free()))
