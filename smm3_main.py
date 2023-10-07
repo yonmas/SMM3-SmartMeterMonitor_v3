@@ -342,7 +342,7 @@ def send_hist(hist_flag, unit_flag, unit_count, n):
 
 # 【send】 積算電力量　取得 ＆ 表示 & 子機送信
 def send_cumul():
-    logger.debug('\n[CUML] == Monthly e-Energy & Monthly Charge ==')
+    logger.debug('[CUML] == Monthly e-Energy & Monthly Charge ==')
 
     result = False
     _collect = collect
@@ -371,7 +371,7 @@ def send_cumul():
 
 # 【send】 瞬時電力・瞬時電流　取得 ＆ 表示 ＆ 子機送信
 def send_inst():
-    logger.debug('\n[INST] == Wattage & Amperage ==')
+    logger.debug('[INST] == Wattage & Amperage ==')
 
     result = False
     _wattage = wattage
@@ -379,9 +379,7 @@ def send_inst():
 
     try:
         # 取得
-        (_, _wattage) = bp35a1.get_instantaneous_wattage()
-        utime.sleep(1)
-        (_, _amperage) = bp35a1.get_instantaneous_amperage()
+        (_wattage, _amperage) = bp35a1.get_instantaneous_data()
 
         # 子機送信：瞬時電力、瞬時電力発信
         espnow.broadcast(data=str('INST' + str(_wattage) + '/' + str(_amperage)))
