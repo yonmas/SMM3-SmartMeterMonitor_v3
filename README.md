@@ -96,7 +96,7 @@ Ambient でアカウントを作成し、チャネルを作成。チャネルID�
 #### モジュールのダウンロードはこちらから
 
 [ambient.py](https://github.com/AmbientDataInc/ambient-python-lib/blob/master/ambient.py)  
-[logging.py](https://github.com/micropython/micropython-lib/blob/master/python-stdlib/logging/logging.py)
+[logging.py](https://github.com/m5stack/M5Stack_MicroPython/blob/master/MicroPython_BUILD/components/micropython/esp32/modules/logging.py)
 
 ## 5. 初期設定
 
