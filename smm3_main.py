@@ -90,9 +90,9 @@ def flip_lcd_orientation():
 # 【exec】　WiFi接続チェック
 def checkWiFi(arg):
     if not wifiCfg.is_connected():
-        logger.warn('Reconnect to WiFi')
+        logger.warning('Reconnect to WiFi')
         if not wifiCfg.reconnect():
-            logger.warn('Rest')
+            logger.warning('Rest')
             machine.reset()
 
 
@@ -268,7 +268,8 @@ def set_instance(config):
 
     logger.info('[INIT] Charge Function: %s', calc_charge_func.__name__)
 
-    logger.setLevel(eval('logging.{}'.format(config['LOG_LEVEL'])))
+    log_level = getattr(logging, config['LOG_LEVEL'], None)
+    logging.basicConfig(level=log_level)
     logger.info('[INIT] Logging level = %s', config['LOG_LEVEL'])
 
 
@@ -420,8 +421,8 @@ if __name__ == '__main__':
 
     try:
         # logger 初期化
+        logging.basicConfig(level=logging.INFO)
         logger = logging.getLogger(logger_name)
-        logger.setLevel(logging.INFO)  # 初期値 INFO
 
         # WiFi　&ESP-NOW 設定
         lcd.orient(lcd.PORTRAIT_FLIP)

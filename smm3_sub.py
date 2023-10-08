@@ -696,7 +696,8 @@ def reload_config(config):
     cnfg.save_config(config)
     DAY_GRAPH_SCALE, GRAPH_SCALE, BG_COLOR, unit = cnfg.set_config(config)
 
-    logger.setLevel(eval('logging.{}'.format(config['LOG_LEVEL'])))
+    log_level = getattr(logging, config['LOG_LEVEL'], None)
+    logging.basicConfig(level=log_level)
     logger.info('[INIT] Logging level = %s', config['LOG_LEVEL'])
 
     init_screen()
@@ -727,8 +728,8 @@ if __name__ == '__main__':
 
     try:
         # logger 初期化
+        logging.basicConfig(level=logging.INFO)
         logger = logging.getLogger(logger_name)
-        logger.setLevel(logging.INFO)  # 初期値 INFO
 
         # WiFi & ESP-NOW 設定
         wifiCfg.autoConnect(lcdShow=True)
@@ -745,7 +746,8 @@ if __name__ == '__main__':
         cnfg.save_config(config)
         DAY_GRAPH_SCALE, GRAPH_SCALE, BG_COLOR, unit = cnfg.set_config(config)
 
-        logger.setLevel(eval('logging.{}'.format(config['LOG_LEVEL'])))
+        log_level = getattr(logging, config['LOG_LEVEL'], None)
+        logging.basicConfig(level=log_level)
         logger.info('[INIT] Logging level = %s', config['LOG_LEVEL'])
 
         # RTC設定（時刻設定）

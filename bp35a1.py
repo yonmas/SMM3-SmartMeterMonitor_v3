@@ -134,8 +134,9 @@ class BP35A1:
         self.scan = {}  # 'Channel', 'Pan ID', 'Addr', 'LQI'
 
         global logger
+        log_level = getattr(logging, log_level, None)
+        logging.basicConfig(level=log_level)
         logger = logging.getLogger('BP35A1')
-        logger.setLevel(eval('logging.{}'.format(log_level)))
         logger.info('[INIT] Class BP35A1 imported')
 
 

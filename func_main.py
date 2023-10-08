@@ -23,8 +23,8 @@ SHEET_AREA = 'config!B3:O30'
 bgcolor = 0x000000    # Background color
 uncolor = 0xa0a0a0    # Unit color
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('CNFG')
-logger.setLevel(logging.INFO)  # 初期値 INFO
 
 
 # 【exec】　動作音beep

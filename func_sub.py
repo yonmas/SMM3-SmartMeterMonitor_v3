@@ -19,8 +19,8 @@ INIT_URL = (BASE_URL + INIT_SPREADSHEET_ID + '/values/' + INIT_AREA + '?key=' + 
 # 設定用GSSの読み込み範囲（初期値）
 SHEET_AREA = 'config!B32:O46'
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('CNFG')
-logger.setLevel(logging.INFO)  # 初期値 INFO
 
 
 # 【exec】　動作音beep
@@ -125,7 +125,7 @@ def get_api_config():
             #     try:
             #         uos.remove(API_CONFIG_FILE)  #
             #         status('API_file removed !', color=0xff8000)
-            #         except Exception:
+            #     except Exception:
             #         pass
             api_config = None
 
