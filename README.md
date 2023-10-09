@@ -76,7 +76,7 @@ Ambient でアカウントを作成し、チャネルを作成。チャネルID�
   +- calc_charge.py (電気料金計算モジュール)
   +- logging.py (別途準備)
   +- api_config.json (オプション：設定用GoogleスプレッドシートのAPI情報)
-  +- smm_config_main.json (オプション：親機設定ファイル)
+  +- config_main.json (オプション：親機設定ファイル)
   +- ambient.py (オプション：別途準備)
 ```
 
@@ -90,7 +90,7 @@ Ambient でアカウントを作成し、チャネルを作成。チャネルID�
 /（ルート）
   +- func_main.py (外部モジュール)
   +- api_config.json (オプション：設定用GoogleスプレッドシートのAPI情報)
-  +- amm_config_sub.json (オプション：子機設定ファイル)
+  +- config_sub.json (オプション：子機設定ファイル)
 ```
 
 #### モジュールのダウンロードはこちらから
