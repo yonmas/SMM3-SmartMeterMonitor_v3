@@ -1,4 +1,7 @@
 # SMM3 : Smart Meter Monitor v.3
+一部の設定用変数名を変更しました。最新のコードと設定用GSSをご利用ください！！(2023/10/10)
+
+---
 **M5Stackで電力使用量を「見える化」して電気代を節約しよう！**
 
 [![title](https://github-production-user-asset-6210df.s3.amazonaws.com/104808539/273613295-9f8fb870-071d-44b1-a14b-477ec1338b59.jpg)](https://www.youtube.com/watch?v=5jaRR_evKWo)
