@@ -1,7 +1,7 @@
 # SMM3 : Smart Meter Monitor v.3
 **M5Stackで電力使用量を「見える化」して電気代を節約しよう！**
 
-![IMG_1441](https://github.com/yonmas/SMM3-SmartMeterMonitor_v3/assets/104808539/ea885cbe-5d96-407c-9184-61041849f4c3)
+[![title](https://github.com/yonmas/SMM3-SmartMeterMonitor_v3/assets/104808539/7edd883a-d7e2-4e7d-b3b4-20898d7fa7e6)](https://www.youtube.com/watch?v=5jaRR_evKWo)
 
 ## 0. 最低限の手順
 
@@ -75,9 +75,10 @@ Ambient でアカウントを作成し、チャネルを作成。チャネルID�
   +- func_main.py (外部モジュール)
   +- calc_charge.py (電気料金計算モジュール)
   +- logging.py (別途準備)
+  +- ambient.py (オプション：別途準備)
+  ===== 以下のファイルはGSSによる設定を行わない場合のみ使用 =====
   +- api_config.json (オプション：設定用GoogleスプレッドシートのAPI情報)
   +- config_main.json (オプション：親機設定ファイル)
-  +- ambient.py (オプション：別途準備)
 ```
 
 ```text
@@ -88,10 +89,13 @@ Ambient でアカウントを作成し、チャネルを作成。チャネルID�
   +- smm3_sub.py (子機メインプログラム)
 
 /（ルート）
-  +- func_main.py (外部モジュール)
+  +- func_sub.py (外部モジュール)
+  +- logging.py (別途準備)
+  ===== 以下のファイルはGSSによる設定を行わない場合のみ使用 =====
   +- api_config.json (オプション：設定用GoogleスプレッドシートのAPI情報)
   +- config_sub.json (オプション：子機設定ファイル)
 ```
+同梱の _config_main.json, _api_config.json は、必要最低限の設定値（それぞれ、Bルートのアカウント、設定用Googleスプレッドシート（設定用GSS）のAPI情報）のみを記載したものです。アンダーバーを削除してお使いください。記載のない設定値はプログラム内の初期値が使用されます。（添付の設定用ファイルの各項目の値とプログラム内の初期値は同じです。）
 
 #### モジュールのダウンロードはこちらから
 
