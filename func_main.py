@@ -219,7 +219,7 @@ def set_config(config):
     CONTRACT_AMPERAGE = config['CONTRACT_AMPERAGE']
 
     # 月ごとの検針日指定がなければ、既定値を使用する
-    if '' in config['COLLECT_CALENDER']:
-        config['COLLECT_CALENDER'] = [config['COLLECT_DATE']] * 13
+    if '' in config['COLLECT_CALENDAR']:
+        config['COLLECT_CALENDAR'] = [config['COLLECT_DATE']] * 13
 
     return config, TIMEOUT_MAIN, WARNING_AMPERAGE, CONTRACT_AMPERAGE

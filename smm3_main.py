@@ -22,7 +22,7 @@ config = {
     'CONTRACT_AMPERAGE': 40,
     'WARNING_AMPERAGE': 30,
     'COLLECT_MONTH': [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-    'COLLECT_CALENDER': [''] * 13,
+    'COLLECT_CALENDAR': [''] * 13,
     'COLLECT_DATE': 15,
     'CHARGE_FUNC': 'tepco',
     'BASE': 1180.96,
@@ -232,14 +232,14 @@ def set_instance(config):
     status('Create objects', uncolor)
     bp35a1 = BP35A1(config['B_ID'],
                     config['B_PASSWORD'],
-                    config['COLLECT_CALENDER'],
+                    config['COLLECT_CALENDAR'],
                     ipv6_addr,
                     coefficient,
                     unit,
                     progress_func=progress,
                     log_level=config['LOG_LEVEL'])
     logger.info('[INIT] BP35A1 config: (%s, %s, %s)', config['B_ID'],
-                config['B_PASSWORD'], config['COLLECT_CALENDER'])
+                config['B_PASSWORD'], config['COLLECT_CALENDAR'])
 
     # Ambient のアカウント設定
     if (config['A_ID'] != '*') and (config['A_KEY'] != '*'):
@@ -298,7 +298,7 @@ def send_unit(unit_flag, unit_count):
     if unit_flag is False:
         espnow.broadcast(data=str('UNT=' + str(unit * coefficient)))
         unit_flag = True
-        logger.info('[UNIT] >> %.1f', unit * coefficient)
+        logger.info('[UNIT] -> %.1f', unit * coefficient)
     else:
         unit_count += 1
         logger.debug('[UNIT] Skip UNIT Request: counter = %d', unit_count)
@@ -323,9 +323,9 @@ def send_hist(hist_flag, unit_flag, unit_count, n):
                 _hist_data_47 = round(int(_hist_data[-8:], 16) * unit * coefficient, 1)
             else:
                 _hist_data_47 = 0.0
-            logger.info('[HIST] >> (%d) = [%s, [%s - %s]]', n, hist_data[4:23].decode('utf-8'),
+            logger.info('[HIST] -> (%d) = [%s, [%s - %s]]', n, hist_data[4:23].decode('utf-8'),
                         str(_hist_data_00), str(_hist_data_47))
-            logger.debug('[HIST] >> Raw(%d) = [%s]', n, _hist_data)
+            logger.debug('[HIST] -> Raw(%d) = [%s]', n, _hist_data)
 
         except Exception as e:
             logger.error('[HIST] %s', e)
@@ -360,7 +360,7 @@ def send_cumul():
         CUML = str('CUML' + str(_e_energy) + '/' + str(_created) + '/' + str(_collect) + '/'
                    + str(_monthly_e_energy) + '/' + str(_charge))
         espnow.broadcast(data=CUML)
-        logger.info('[CUML] >> [%s]', str(CUML))
+        logger.info('[CUML] -> [%s]', str(CUML))
 
         result = True
 
@@ -384,7 +384,7 @@ def send_inst():
 
         # 子機送信：瞬時電力、瞬時電力発信
         espnow.broadcast(data=str('INST' + str(_wattage) + '/' + str(_amperage)))
-        logger.info('[INST] >> [%s , %s]', str(_wattage), str(_amperage))
+        logger.info('[INST] -> [%s , %s]', str(_wattage), str(_amperage))
 
         result = True
 
@@ -507,7 +507,7 @@ if __name__ == '__main__':
             d = espnow.recv_data()
             key = str(d[2].decode())
             if key != '':
-                logger.info('[RECV] << Key = [%s]', key)
+                logger.info('[RECV] <- Key = [%s]', key)
 
             # # << unit*coefficient を子機に送信する場合
             # # 'UNIT' 積算電力量-[単位x係数]のリクエストに応答

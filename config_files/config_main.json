@@ -7,7 +7,7 @@
   "CONTRACT_AMPERAGE": 40,
   "WARNING_AMPERAGE": 30,
   "COLLECT_MONTH": [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-  "COLLECT_CALENDER": ["", "", "", "", "", "", "", "", "", "", "", "", ""],
+  "COLLECT_CALENDAR": ["", "", "", "", "", "", "", "", "", "", "", "", ""],
   "COLLECT_DATE": 15,
   "CHARGE_FUNC": "tepco",
   "BASE": 1180.96,
