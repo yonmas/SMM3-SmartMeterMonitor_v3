@@ -1,14 +1,13 @@
 import logging
 import machine
-import ujson
-import uos
 import utime
+import uos
+import ujson
 
 # global variables
 logger = None
 TIMEOUT_20s = 20
 TIMEOUT_60s = 60
-wait = 0  # スマートメーターにコマンドを送るインターバル
 
 
 # 【decorator】 IOコマンド [コマンド／レスポンス] : DEBUGレベル
@@ -138,7 +137,7 @@ class BP35A1:
         log_level = getattr(logging, log_level, None)
         logging.basicConfig(level=log_level)
         logger = logging.getLogger('BP35A1')
-        logger.info('[INIT] Class BP35A1 initialized')
+        logger.info('[INIT] Class BP35A1 imported')
 
 
 # 【初期化　セクション】
@@ -402,7 +401,7 @@ class BP35A1:
     
     # 【property】 プロパティ値読み出し（瞬時電力＋瞬時電流)
     @propfunc
-    def read_property_wa(self, timeout=TIMEOUT_60s):
+    def read_property_wa(self, timeout=TIMEOUT_20s):
         self.skSendTo((
             b'\x10\x81'  # EHD
             b'\x00\x01'  # TID
@@ -442,13 +441,13 @@ class BP35A1:
         while retries <= 3:  # リトライ回数
             try:
                 # 積算電力量-履歴データ-収集日(E5)の設定
-                utime.sleep(wait)
+                utime.sleep(1)
                 self.write_property('E5', n)
                 # 積算電力量-履歴データ(E2)の取得
-                utime.sleep(wait)
+                utime.sleep(1)
                 (days, history_of_e_energy) = self.read_property('E2', TIMEOUT_60s)
                 # 定時積算電力量計測値(EA)の取得
-                utime.sleep(wait)
+                utime.sleep(1)
                 (created, e_energy) = self.read_property('EA')
 
                 return created, history_of_e_energy
@@ -461,23 +460,24 @@ class BP35A1:
 
     # 【get_data】 定時積算電力量計測値(EA)の取得
     def get_cumul_e_energy(self):
-        utime.sleep(wait)
+        utime.sleep(1)
         return self.read_property('EA')
 
     # 【get_data】 瞬時電力計測値(E7)の取得
     def get_instantaneous_wattage(self):
-        utime.sleep(wait)
+        utime.sleep(1)
         return self.read_property('E7')
 
     # 【get_data】 瞬時電流計測値(E8)の取得
     def get_instantaneous_amperage(self):
-        utime.sleep(wait)
+        utime.sleep(1)
         return self.read_property('E8')
 
     # 【get_data】 瞬時電力計測値(E7) & 瞬時電流計測値(E8)の取得
     def get_instantaneous_data(self):
-        utime.sleep(wait)
+        utime.sleep(1)
         return self.read_property_wa()
+
 
     # 【get_data】　前回検針日を起点とした積算電力量計測値履歴１(E2)の取得
     def get_monthly_e_energy(self):
@@ -487,15 +487,15 @@ class BP35A1:
         while retries <= 3:  # リトライ回数
             try:
                 # 積算履歴収集日１(E5)の設定
-                utime.sleep(wait)
+                utime.sleep(1)
                 self.write_property('E5', days_after_collect(self.collect_date))
                 # 積算電力量計測値履歴１(E2)の取得
-                utime.sleep(wait)
+                utime.sleep(1)
                 (days, collected_e_energy) = self.read_property('E2', TIMEOUT_60s)
                 (days, collected_e_energy) = (days, int(collected_e_energy[0:0 + 8], 16)
                                               * self.coefficient * self.unit)
                 # 定時積算電力量計測値(EA)の取得
-                utime.sleep(wait)
+                utime.sleep(1)
                 (created, e_energy) = self.read_property('EA')
 
                 # 前回検針日と定時積算電力量計測値(EA)との差分
@@ -507,32 +507,6 @@ class BP35A1:
                 retries += 1
 
         raise Exception('BP35A1.get_monthly_e_energy() retry over.')
-
-    # 【get_data】　前回検針日の積算電力量計測値履歴１(E2)の取得
-    def get_collected_e_energy(self):
-
-        retries = 0
-
-        while retries <= 3:  # リトライ回数
-            try:
-                # 積算履歴収集日１(E5)の設定
-                utime.sleep(wait)
-                self.write_property('E5', days_after_collect(self.collect_date))
-                # 積算電力量計測値履歴１(E2)の取得
-                utime.sleep(wait)
-                (days, collected_e_energy) = self.read_property('E2', TIMEOUT_60s)
-                (days, collected_e_energy) = (days, int(collected_e_energy[0:0 + 8], 16)
-                                              * self.coefficient * self.unit)
-                return collected_e_energy
-            except Exception as e:
-                logger.error('[CUML] %s [retries = %d]', e, retries)
-                retries += 1
-
-        raise Exception('BP35A1.get_collected_e_energy() retry over.')
-    
-    # 【get_data】　直近の検針日と、検針日からの経過日数
-    def get_collect_date(self):
-        return last_collect_day(self.collect_date), days_after_collect(self.collect_date)
 
 
 # 【メイン　セクション】
@@ -591,16 +565,16 @@ class BP35A1:
                 # 係数(D3)の取得 coefficient
                 self.progress(80)
                 if self.coefficient is None:
-                    utime.sleep(0.5)
                     self.coefficient = self.read_property('D3')
                 logger.info('[INIT] coefficient = %s', str(self.coefficient))
+                utime.sleep(1)
 
                 # 積算電力量単位(E1)の取得 unit
                 self.progress(90)
                 if self.unit is None:
-                    utime.sleep(0.5)
                     self.unit = self.read_property('E1')
                 logger.info('[INIT] unit = %s', str(self.unit))
+                utime.sleep(1)
 
                 # 処理ループ終了 return
                 self.progress(100)

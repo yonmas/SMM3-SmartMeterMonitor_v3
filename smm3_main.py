@@ -1,16 +1,18 @@
-from m5stack import lcd, btnA
+from m5stack import lcd, btnA, btnB
+from machine import Timer, reset
 import binascii
 import espnow
+import gc
 import logging
-import machine
+import math
 import ntptime
+import sys
 import utime
 import wifiCfg
-import sys
 from bp35a1 import BP35A1
 from calc_charge import CalcCharge
-import func_main as cnfg
 from func_main import beep, status
+import func_main as cnfg
 
 # 定数初期値
 config = {
@@ -45,9 +47,16 @@ coefficient = None
 unit = None
 orient = lcd.LANDSCAPE      # Display orientation
 max_retries = 30            # Maximum number of times to retry
-data_period = 30            # 何日前までのデータを参照するか
 data_mute = False
 ampere_limit_over = False
+step = 0
+
+# タイマー
+indicator_timer = Timer(-1)
+checkWiFi_timer = Timer(-1)
+
+# 履歴データを取得する期間（日）
+data_period = 35            # 何日前までのデータを参照するか
 
 # Colormap (tab10)
 colormap = (
@@ -70,6 +79,58 @@ color2 = 0xe08040     # Total value color
 color3 = colormap[3]  # Limit over color
 grayout = 0x303030
 
+# 時間帯インデックス(30分毎：0〜47)
+TIME_TB = [
+    "00:00", "00:30",
+    "01:00", "01:30",
+    "02:00", "02:30",
+    "03:00", "03:30",
+    "04:00", "04:30",
+    "05:00", "05:30",
+    "06:00", "06:30",
+    "07:00", "07:30",
+    "08:00", "08:30",
+    "09:00", "09:30",
+    "10:00", "10:30",
+    "11:00", "11:30",
+    "12:00", "12:30",
+    "13:00", "13:30",
+    "14:00", "14:30",
+    "15:00", "15:30",
+    "16:00", "16:30",
+    "17:00", "17:30",
+    "18:00", "18:30",
+    "19:00", "19:30",
+    "20:00", "20:30",
+    "21:00", "21:30",
+    "22:00", "22:30",
+    "23:00", "23:30",
+]
+
+
+# 【calc】　today[yyyy-mm-dd] から days日前の日付[MM/DD]を返す
+def date_of_days_ago(today, days):
+    year = int(today[:4])
+    month = int(today[5:7])
+    date = int(today[8:10])
+    t = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+    if (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0):
+        t = (31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)  # うるう年
+
+    days_of_year = sum(t[:month - 1]) + date
+
+    ago_date = days_of_year - days
+    if ago_date > 0:
+        ago_month = 1
+        while ago_date > t[ago_month - 1]:
+            ago_date -= t[ago_month - 1]
+            ago_month += 1
+    else:
+        ago_month = 12
+        ago_date = ago_date + 31
+
+    return '{:d}/{:d}'.format(ago_month, ago_date)
+
 
 # 【exec】　スクリーン上下反転
 def flip_lcd_orientation():
@@ -80,8 +141,6 @@ def flip_lcd_orientation():
     else:
         orient = lcd.LANDSCAPE
 
-    logger.info('Set screen orientation: %s', orient)
-    lcd.clear()
     lcd.orient(orient)
     draw_main()
     beep()
@@ -90,10 +149,10 @@ def flip_lcd_orientation():
 # 【exec】　WiFi接続チェック
 def checkWiFi(arg):
     if not wifiCfg.is_connected():
-        logger.warning('Reconnect to WiFi')
+        logger.warning('[ERR.] Reconnect to WiFi')
         if not wifiCfg.reconnect():
-            logger.warning('Rest')
-            machine.reset()
+            logger.warning('[SYS_] == system reset ==')
+            reset()
 
 
 # 【exec】　プログレスバーの表示
@@ -113,6 +172,16 @@ def draw_main():
     draw_collect_range(collect, created)
     draw_monthly_e_energy(monthly_e_energy)
     draw_monthly_charge(charge)
+
+
+# 【draw】　データ受信インジケーター描画
+def draw_indicator(timer):
+    global step
+    rad = 2 * math.pi * (step / 15)
+    vol = (1 - math.cos(rad)) / 2 * 0xff
+    col = int('0x' + '{:x}'.format(round(vol * 1)) + '0000', 16)
+    lcd.circle(234, 7, 3, col, col)
+    step += 1
 
 
 # 【draw】　瞬時電力計測値の表示
@@ -214,15 +283,7 @@ def check_timeout(inst_time):
         data_mute = True
         draw_wattage(wattage)
         draw_amperage(amperage)
-        espnow.broadcast(data=str('TOUT'))  # ESP NOW で timeout を子機に通知
-
-
-# 【exec】　積算電力量-履歴データを取得
-def get_hist_data(n):
-    (created, history_of_e_energy) = bp35a1.get_hist_cumul_e_energy(n)
-    hist_data = (bytes('ID{:02}{}'.format(n, created), 'UTF-8')
-                 + binascii.unhexlify(history_of_e_energy))
-    return hist_data
+        espnow.broadcast(data=str('M:TOUT'))  # ESP NOW で timeout を子機に通知
 
 
 # 【config】　インスタンスの設定
@@ -276,7 +337,7 @@ def set_instance(config):
 # 【config】　設定用GSSから設定をリロード
 def reload_config(config):
     global TIMEOUT_MAIN, WARNING_AMPERAGE, CONTRACT_AMPERAGE
-    global inst_time, cumul_time, cumul_flag
+    # global inst_time, cumul_time, cumul_flag
 
     lcd.clear()
     status('Reloading config from GSS.', uncolor)
@@ -288,17 +349,17 @@ def reload_config(config):
     draw_main()
     beep()
 
-    inst_time = utime.time() - 120  # INST タイマー
-    cumul_time = utime.time() - 120  # CUML タイマー
-    cumul_flag = False
+    # inst_time = utime.time() - 120  # INST タイマー
+    # cumul_time = utime.time() - 120  # CUML タイマー
+    # cumul_flag = False
 
 
 # 【send】 'UNIT' 積算電力量-[単位x係数]のリクエストに応答
 def send_unit(unit_flag, unit_count):
     if unit_flag is False:
-        espnow.broadcast(data=str('UNT=' + str(unit * coefficient)))
+        espnow.broadcast(data=str('M:UNT=' + str(UNIT)))
         unit_flag = True
-        logger.info('[UNIT] -> %.1f', unit * coefficient)
+        logger.info('[UNIT] -> %.1f', UNIT)
     else:
         unit_count += 1
         logger.debug('[UNIT] Skip UNIT Request: counter = %d', unit_count)
@@ -310,37 +371,6 @@ def send_unit(unit_flag, unit_count):
     return unit_flag, unit_count
 
 
-# 【send】 'REQ' 積算電力量-履歴データのリクエストに応答
-def send_hist(hist_flag, unit_flag, unit_count, n):
-    if hist_flag[n] == 0:
-        try:
-            hist_data = get_hist_data(n)
-            espnow.broadcast(data=hist_data)
-            hist_flag[n] += 1
-            _hist_data = binascii.hexlify(hist_data[23:]).decode('utf-8')
-            _hist_data_00 = round(int(_hist_data[:8], 16) * unit * coefficient, 1)
-            if int(_hist_data[-8:], 16) <= 0x05f5e0ff:
-                _hist_data_47 = round(int(_hist_data[-8:], 16) * unit * coefficient, 1)
-            else:
-                _hist_data_47 = 0.0
-            logger.info('[HIST] -> (%d) = [%s, [%s - %s]]', n, hist_data[4:23].decode('utf-8'),
-                        str(_hist_data_00), str(_hist_data_47))
-            logger.debug('[HIST] -> Raw(%d) = [%s]', n, _hist_data)
-
-        except Exception as e:
-            logger.error('[HIST] %s', e)
-            hist_flag[n] = 0
-
-    else:  # リクエスト応答後に届く重複リクエストを規定回数スキップする
-        hist_flag[n] += 1
-        logger.debug('[HIST] Skip REQ(%d) Request: counter = %d', n, hist_flag[n])
-        if hist_flag[n] >= 5:  # 最大スキップ回数
-            hist_flag[n] = 0  # 規定回数スキップしてもリクエストが届くときはフラグをクリアして再応答
-            logger.debug('[HIST] Reset REQ(%d) Counter', n)
-
-    return hist_flag, unit_flag, unit_count
-
-
 # 【send】 積算電力量　取得 ＆ 表示 & 子機送信
 def send_cumul():
     logger.debug('[CUML] == Monthly e-Energy & Monthly Charge ==')
@@ -348,16 +378,23 @@ def send_cumul():
     result = False
     _collect = collect
     _created = created
+    _e_energy = e_energy
     _monthly_e_energy = monthly_e_energy
     _charge = charge
 
     try:
         # 取得
-        (_collect, _monthly_e_energy, _created, _e_energy) = bp35a1.get_monthly_e_energy()
+        _created, _e_energy = bp35a1.get_cumul_e_energy()
+        _collect, _days_ago = bp35a1.get_collect_date()
+        if hist_flag[_days_ago] is True:
+            _e_energy_0 = hist_data[_days_ago][0] * UNIT
+        else:
+            _e_energy_0 = bp35a1.get_collected_e_energy()
+        _monthly_e_energy = _e_energy - _e_energy_0
         _charge = calc_charge_func(config['CONTRACT_AMPERAGE'], _monthly_e_energy)
 
         # 子機送信
-        CUML = str('CUML' + str(_e_energy) + '/' + str(_created) + '/' + str(_collect) + '/'
+        CUML = str('M:CUML' + str(_collect) + '/' + str(_created) + '/' + str(_e_energy) + '/'
                    + str(_monthly_e_energy) + '/' + str(_charge))
         espnow.broadcast(data=CUML)
         logger.info('[CUML] -> [%s]', str(CUML))
@@ -367,7 +404,7 @@ def send_cumul():
     except Exception as e:
         logger.error('[CUML] %s', e)
 
-    return _collect, _created, _monthly_e_energy, _charge, result
+    return _collect, _created, _e_energy, _monthly_e_energy, _charge, result
 
 
 # 【send】 瞬時電力・瞬時電流　取得 ＆ 表示 ＆ 子機送信
@@ -383,10 +420,13 @@ def send_inst():
         (_wattage, _amperage) = bp35a1.get_instantaneous_data()
 
         # 子機送信：瞬時電力、瞬時電力発信
-        espnow.broadcast(data=str('INST' + str(_wattage) + '/' + str(_amperage)))
-        logger.info('[INST] -> [%s , %s]', str(_wattage), str(_amperage))
+        if isinstance(_wattage, int) and isinstance(_amperage, float):
+            espnow.broadcast(data=str('M:INST' + str(_wattage) + '/' + str(_amperage)))
+            logger.info('[INST] -> [%s , %s]', str(_wattage), str(_amperage))
+            result = True
 
-        result = True
+        else:
+            raise Exception('Illeagal data: [' + _wattage + ']-[' + _amperage + ']')
 
     except Exception as e:
         logger.error('[INST] %s', e)
@@ -417,6 +457,77 @@ def send_ambient():
     return result
 
 
+# 【exec】　積算電力-履歴データ取得
+def get_hist_data():
+    global hist_day, hist_flag, hist_created, hist_date, hist_data, day_shift, cumul_flag
+    global hist_time, cumul_time
+    
+    logger.info('[INIT] Get Historical DATA')
+
+    hist_day = 0  # データ取得日
+    hist_flag = [False] * (data_period + 1)  # 履歴データがあるかどうか
+    hist_created = [''] * (data_period + 1)  # 履歴データの生成日
+    hist_date = [''] * (data_period + 1)  # 履歴データの日にち
+    hist_data = [[0 for i in range(49)] for j in range(data_period + 1)]
+    hist_time = [utime.time() - 1200] * (data_period + 1)  # HIST タイマー
+    day_shift = 0  # 0:00〜0:30 の間はシフト（検討）
+
+    cumul_flag = False
+    cumul_time = utime.time() - 1200  # CUML タイマー
+
+    indicator_timer.deinit()
+    indicator_timer.init(period=200, mode=indicator_timer.PERIODIC, callback=draw_indicator)
+
+    # 親機起動を通知
+    espnow.broadcast(data='M:BOOT')
+    utime.sleep(0.1)
+
+    beep()
+
+# 【exec】 取得済みの積算電力-履歴データを子機に続けて送信
+def send_all_hist_data(id):
+    logger.info('[INIT] Continuously send all hist. data.')
+    _hist_time = [utime.time() - 1200] * (data_period + 1)  # HIST タイマー
+    _time = utime.time()
+    recv = True  # データ受信フラグ
+    while utime.time() - _time < 30:  # 子機からのリクエストが30秒以上途絶えたら終了
+
+        # 指定秒数以内の重複リクエストはスキップ
+        if recv and hist_flag[id] is True and utime.time() - _hist_time[id] > 30:
+            _send_data = ''
+            for k in range(0, 49):
+                _send_data += '{:08X}'.format(hist_data[id][k])
+            send_data = (bytes('M:ID{:02}{}{:5}'
+                               .format(id, hist_created[id], hist_date[id]), 'UTF-8')
+                         + binascii.unhexlify(_send_data + '00'))
+            espnow.broadcast(data=send_data)
+            _hist_time[id] = utime.time()
+            _time = utime.time()
+
+            logger.info('[HIST] -> [(%d) %s [%s %.1f - %.1f : %.1f]]',
+                        id, hist_created[id],
+                        hist_date[id],
+                        hist_data[id][0] * UNIT,
+                        hist_data[id][47] * UNIT,
+                        hist_data[id][48] * UNIT)
+            logger.debug('[HIST] -> Raw = %s', hist_data[id])
+            # logger.debug('[HIST] -> [%d, %s]', id, binascii.hexlify(send_data).decode('utf-8'))
+            if id == 30:
+                return id, _hist_time
+
+        recv = False
+        while not recv and utime.time() - _time < 30:  # 子機からのリクエストが30秒以上途絶えたら終了
+            d = espnow.recv_data()
+            if (len(d[2]) > 0):
+                key = str(d[2].decode().strip())
+                logger.info('[RECV] <- Key = [%s]', key)
+                if key.startswith('REQ'):
+                    id = int(key[3:5])
+                    recv = True  # データ受信フラグ
+
+    return id, _hist_time
+
+
 if __name__ == '__main__':
 
     try:
@@ -431,14 +542,13 @@ if __name__ == '__main__':
         espnow.init(0)
 
         # Start checking the WiFi connection
-        machine.Timer(0).init(period=60 * 1000, mode=machine.Timer.PERIODIC, callback=checkWiFi)
+        checkWiFi_timer.init(period=60 * 1000, mode=checkWiFi_timer.PERIODIC, callback=checkWiFi)
 
         lcd.clear()
         lcd.orient(orient)
         status('Welcome to SMM3 !', uncolor)
 
         # 定数の読み込み（ファイル、Googleスプレッドシート）
-        status('Load configuration', uncolor)
         config = cnfg.update_config_from_file(config)
         api_config = cnfg.get_api_config()
         config = cnfg.update_config_from_gss(api_config, config)
@@ -447,15 +557,18 @@ if __name__ == '__main__':
         set_instance(config)
 
         # RTC設定（時刻設定）
-        status('Set Time', uncolor)
         ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)
+        status('Set Time.', uncolor)
 
         # ボタン検出スレッド起動
         # Aボタン       スクリーン上下反転
         # Aボタン長押し  GSS から config リロード
+        # Bボタン長押し  履歴データ再取得
 
         btnA.wasReleased(flip_lcd_orientation)
         btnA.pressFor(0.8, lambda config=config: reload_config(config))
+        btnB.pressFor(0.8, get_hist_data)
+        status('Button thread start.', uncolor)
 
         # Connecting to Smart Meter
         status('Connecting SmartMeter', uncolor)
@@ -463,94 +576,58 @@ if __name__ == '__main__':
         logger.info('[INIT] Connected. BP35A1: (%s, %s, %s, %s, %s)',
                     channel, pan_id, mac_addr, lqi, ipv6_addr)
 
-        # Start monitoring
-        status('Start monitoring', uncolor)
-
         # 親機起動を通知
-        espnow.broadcast(data='BOOT')
+        espnow.broadcast(data='M:BOOT')
         utime.sleep(0.1)
-        # espnow.broadcast(data=str('UNT=' + str(unit*coefficient)))
+        # espnow.broadcast(data=str('M:UNT=' + str(UNIT)))
+
+        status('== Start monitoring ==', uncolor)
+        utime.sleep(1)
 
         # データ取得処理
-        hist_flag = [1] * (data_period + 2)
+        hist_day = 0  # データ取得日
+        hist_flag = [False] * (data_period + 1)  # 履歴データがあるかどうか
+        hist_created = [''] * (data_period + 1)  # 履歴データの生成日
+        hist_date = [''] * (data_period + 1)  # 履歴データの日にち
+        hist_data = [[0 for i in range(49)] for j in range(data_period + 1)]
+        day_shift = 0  # 0:00〜0:30 の間はシフト（検討）
         cumul_flag = False
 
-        # << unit*coefficient を子機に送信する場合
-        unit_flag = True
+        UNIT = unit * coefficient
+        
+        # << UNIT を子機に送信する場合
+        unit_flag = True  # << UNIT を子機に送信する場合はコメントアウト
         unit_count = 0
 
         # 表示値初期値
         wattage = 0
         amperage = 0
+        e_energy = 0
         monthly_e_energy = 0
         charge = 0
         collect = '****-**-** **:**:**'
         created = '****-**-** **:**:**'
 
-        # タイマー処理
-        inst_time = utime.time() - 120  # INST タイマー
-        cumul_time = utime.time() - 120  # CUML タイマー
-        ambient_time = utime.time() - 120  # Ambient タイマー
-        ping_time = utime.time() - 120  # ping タイマー
-
+        # タイマー初期化
+        hist_time = [utime.time() - 1200] * (data_period + 1)  # HIST タイマー
+        cumul_time = utime.time() - 1200  # CUML タイマー
+        inst_time = utime.time() - 1200  # INST タイマー
+        ambient_time = utime.time() - 1200  # Ambient タイマー
+        ping_time = utime.time() - 1200  # ping タイマー
+        
         # 画面初期化
         lcd.clear()
         draw_main()
-        # status('Please wait a moment.', uncolor)
+        indicator_timer.deinit()
+        indicator_timer.init(period=200, mode=indicator_timer.PERIODIC, callback=draw_indicator)
 
-        retries = 0  # リトライカウンター
+        retries = 0  # リトライカウンターリセット
+
 
         # メインループ
         while retries < max_retries:
 
-            # 子機からデータを受信(ESP NOW)
-            d = espnow.recv_data()
-            key = str(d[2].decode())
-            if key != '':
-                logger.info('[RECV] <- Key = [%s]', key)
-
-            # # << unit*coefficient を子機に送信する場合
-            # # 'UNIT' 積算電力量-[単位x係数]のリクエストに応答
-            # if key.startswith('UNIT'):
-            #     unit_flag, unit_count = send_unit(unit_flag, unit_count)
-            unit_flag = True  # << unit*coefficient を子機に送信する場合はコメントアウト
-
-            # 'REQ' 積算電力量-履歴データのリクエストに応答
-            if key.startswith('REQ'):
-                n = int(key[3:5])
-                if (n == 0) and (hist_flag[1] != 0) and (unit_flag is True):
-                    hist_flag = [0] * (data_period + 2)
-                    cumul_flag = False
-                    cumul_time = utime.time() - 120
-                    # unit_flag = False
-                    # unit_count = 0
-
-                hist_flag, unit_flag, unit_count = send_hist(hist_flag, unit_flag, unit_count, n)
-
-            check_timeout(inst_time)  # スマートメーターからのデータのタイムアウト判定
-
-            # 積算電力量　取得 ＆ 表示 & 子機送信：Updated every 10 minutes
-            if (((utime.localtime()[4] % 10 == 0) and (utime.time() - cumul_time >= 60))
-                    or ((cumul_flag is False) and (utime.time() - cumul_time >= 60))):
-                utime.sleep(3)
-                cumul_flag = False
-                collect, created, monthly_e_energy, charge, result = send_cumul()
-                cumul_time = utime.time()
-                if result is True:
-                    retries = 0
-                    cumul_flag = True
-
-                    # 表示
-                    draw_collect_range(collect, created)
-                    draw_monthly_e_energy(monthly_e_energy)
-                    draw_monthly_charge(charge)
-
-                else:
-                    retries += 1
-
-            check_timeout(inst_time)  # スマートメーターからのデータのタイムアウト判定
-
-            # 瞬時電力・瞬時電流　取得 ＆ 表示 ＆ 子機送信：Updated every 10 seconds
+            # 【INST】 瞬時電力・瞬時電流　取得 ＆ 表示 ＆ 子機送信：Updated every 10 seconds
             if (utime.time() - inst_time) >= 10:
                 wattage, amperage, result = send_inst()
                 inst_time = utime.time()
@@ -573,7 +650,148 @@ if __name__ == '__main__':
 
             check_timeout(inst_time)  # スマートメーターからのデータのタイムアウト判定
 
-            # Ambientデータ送信：Send every config['A_INTERVAL'] seconds
+            # 【CUML】 積算電力量　取得 ＆ 表示 & 子機送信：Updated every 10 minutes
+            if ((((utime.localtime()[4] - 1) % 10 == 0) and (utime.time() - cumul_time >= 60))
+                or ((cumul_flag is False) and (utime.time() - cumul_time >= 60))):
+                utime.sleep(1)
+                cumul_flag = False
+                collect, created, e_energy, monthly_e_energy, charge, result = send_cumul()
+                cumul_time = utime.time()
+                if result is True:
+                    created_date = created[:10]
+                    created_time = created[11:16] 
+                    retries = 0
+                    cumul_flag = True
+                    
+                    # 日跨ぎ処理
+                    if TIME_TB.index(created_time) == 0:
+                        hist_data[0][48] = int(e_energy / UNIT)  # 00:00のデータなら、当日24:00のデータに
+                    else:
+                        # 00:30のデータ かつ 当日01:00のデータがある（日跨ぎ処理未実施）なら、日跨ぎ処理を行う
+                        if TIME_TB.index(created_time) == 1 and hist_data[0][2] != 0:
+                            for id in range(data_period, 0, -1):
+                                hist_created[id] = hist_created[id - 1]
+                                hist_date[id] = hist_date[id - 1]  # 履歴日付けシフト
+                                hist_data[id] = hist_data[id - 1]  # 履歴データシフト
+                            hist_data[0] = [0] * 49  # 当日のデータをクリア
+                            hist_date[0] = date_of_days_ago(created_date, 0)
+                            hist_data[0][0] = hist_data[1][48]  # 前日（シフト後)24:00 → 当日00:00
+                            hist_flag[hist_day] = True
+                            day_shift = 0
+                            logger.info('[EXEC] Day-to-Day processed!')
+                            ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)  # 時計合わせ
+                        # 履歴データ → hist_data
+                        hist_data[0][TIME_TB.index(created_time)] = int(e_energy / UNIT)
+
+                    # 表示
+                    draw_collect_range(collect, created)
+                    draw_monthly_e_energy(monthly_e_energy)
+                    draw_monthly_charge(charge)
+
+                else:
+                    retries += 1
+
+            check_timeout(inst_time)  # スマートメーターからのデータのタイムアウト判定
+            
+            # 【RCEV】 子機からデータを受信(ESP NOW)
+
+            d = espnow.recv_data()
+            
+            if (len(d[2]) > 0):
+                key = str(d[2].decode().strip())
+                logger.info('[RECV] <- Key = [%s]', key)
+
+                # # 【UNIT】 UNIT を子機に送信する場合
+                # # 'UNIT' 積算電力量-[単位x係数]のリクエストに応答
+                # if key.startswith('UNIT'):
+                #     unit_flag, unit_count = send_unit(unit_flag, unit_count)
+
+                # 【HIST】 'REQ' 積算電力量-履歴データのリクエストに応答
+                if key.startswith('REQ'):
+                    id = int(key[3:5])
+                    
+                    if id == 0:
+                        cumul_flag = False
+                        cumul_time = utime.time() - 1200
+
+                        # 取得済みの履歴データを一気に子機に送信する場合。送信中は瞬時計測値等は更新しない
+                        # if hist_flag[0] is True:
+                        #     id, hist_time = send_all_hist_data(id)
+
+                    # 指定秒数以内の重複リクエストはスキップ
+                    if hist_flag[id] is True and utime.time() - hist_time[id] > 30:
+                        _send_data = ''
+                        for k in range(0, 49):
+                            _send_data += '{:08X}'.format(hist_data[id][k])
+                        send_data = (bytes('M:ID{:02}{}{:5}'
+                                           .format(id, hist_created[id], hist_date[id]), 'UTF-8')
+                                     + binascii.unhexlify(_send_data + '00'))
+                        espnow.broadcast(data=send_data)
+                        hist_time[id] = utime.time()
+
+                        logger.info('[HIST] -> [(%d) %s [%s %.1f - %.1f : %.1f]]',
+                                    id, hist_created[id],
+                                    hist_date[id],
+                                    hist_data[id][0] * UNIT,
+                                    hist_data[id][47] * UNIT,
+                                    hist_data[id][48] * UNIT)
+                        logger.debug('[HIST] -> Raw = %s', hist_data[id])
+                        # logger.debug('[HIST] -> [%d, %s]', id, binascii.hexlify(send_data).decode('utf-8'))
+
+                check_timeout(inst_time)  # スマートメーターからのデータのタイムアウト判定
+
+            # 【HIST】 履歴データを順に取得する
+            if hist_flag[hist_day] is False:
+                if hist_day == 0:
+                    init_time = utime.time()
+                try:
+                    (_created, _data) = bp35a1.get_hist_cumul_e_energy(hist_day + day_shift)
+                    _created_date = _created[:10]
+                    _created_time = _created[11:16]
+
+                    if _created_time == '00:00' and day_shift == 0:
+                        hist_data[hist_day][48] = int(_data[:8], 16)
+                        day_shift = 1
+
+                    elif hist_flag[hist_day] is False:   # 要求日のデータが存在しなければ、受信処理
+                        for k in range(0, 48):
+                            if int(_data[(k * 8):(k * 8) + 8], 16) > 0x05f5e0ff:  # =99999999
+                                hist_data[hist_day][k] = 0
+                            else:
+                                hist_data[hist_day][k] = int(_data[(k * 8):(k * 8) + 8], 16)
+                        hist_created[hist_day] = _created
+                        hist_date[hist_day] = date_of_days_ago(_created_date, hist_day + day_shift)
+                        hist_flag[hist_day] = True
+
+                        logger.info('[HIST] <= BP35A1: [(%d) %s [%s %.1f - %.1f : %.1f]]',
+                                    hist_day, hist_created[hist_day],
+                                    hist_date[hist_day],
+                                    hist_data[hist_day][0] * UNIT,
+                                    hist_data[hist_day][47] * UNIT,
+                                    hist_data[hist_day][48] * UNIT)
+                        logger.debug('[HIST] <= BP35A1: Raw = %s', hist_data[hist_day])
+
+                        if hist_day < data_period:
+                            hist_data[hist_day + 1][48] = hist_data[hist_day][0]
+                            hist_day += 1
+
+                        else:
+                            beep()
+                            t =utime.time() - init_time
+                            logger.info('[HIST] Data acquisition completed. time = %d', t)
+                            indicator_timer.deinit()
+                            lcd.circle(234, 7, 3, 0x000000, 0x000000)
+
+                        retries = 0
+
+                except Exception as e:
+                    logger.error('[HIST] %s', e)
+                    hist_flag[hist_day] = False
+                    retries += 1
+
+            check_timeout(inst_time)  # スマートメーターからのデータのタイムアウト判定
+
+            # 【AMBIENT】 Ambientデータ送信：Send every config['A_INTERVAL'] seconds
             if (utime.time() - ambient_time) >= config['A_INTERVAL']:
                 result = send_ambient()
                 ambient_time = utime.time()
@@ -582,18 +800,19 @@ if __name__ == '__main__':
                 else:
                     retries += 1
 
-            # 動作確認：Ping every 1 hour
+            # 【PING】 動作確認：Ping every 1 hour
             if (utime.time() - ping_time) >= (60 * 60):
                 logger.info('[SYS_] Ping BP35A1')
                 bp35a1.skPing()
                 ping_time = utime.time()
-
-            utime.sleep(1)
+                        
+            gc.collect()
+            # utime.sleep(0.5)
             # print('[SYS_] mem_free = {} byte'.format(gc.mem_free()))
 
     except Exception as e:
         logger.error('[ERR.] == Final Exception ==: %s', e)
 
     finally:
-        logger.info('[SYS_] == system reset ==')
-        machine.reset()
+        logger.critical('[SYS_] == system reset ==')
+        reset()

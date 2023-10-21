@@ -1,16 +1,17 @@
 from m5stack import lcd, speaker, btnA, btnB, btnC
-from machine import Timer, reset
+from machine import Timer
 import _thread
 import binascii
 import espnow
-import gc
-import logging
 import math
 import ntptime
 import utime
 import wifiCfg
-from func_sub import beep, status
+import gc
+import machine
+import logging
 import func_sub as cnfg
+from func_sub import beep, status
 
 # 定数初期値 : 優先順位　 　設定GSS > 設定ファイル > 初期値
 config = {
@@ -37,9 +38,8 @@ page = 0
 auto_rotation_sw = False  # オートローテーションのスイッチ
 
 # タイマー
-rotation_timer = Timer(-1)
-indicator_timer = Timer(-1)
-checkWiFi_timer = Timer(-1)
+rotation_timer = Timer(0)
+indicator_timer = Timer(3)
 
 # 履歴データを取得する期間（日）
 data_period = 30
@@ -121,19 +121,8 @@ def date_of_days_ago(today, days):
     return '{:d}/{:d}'.format(ago_month, ago_date)
 
 
-# 【exec】　WiFi接続チェック
-def checkWiFi(arg):
-    logger.info('[EXEC] Checking Wi-Fi.')
-    if not wifiCfg.is_connected():
-        logger.warning('[ERR.] Reconnect to WiFi')
-        if not wifiCfg.reconnect():
-            logger.warning('[SYS_] == system reset ==')
-            reset()
-
-
 # 【exec】　BEEP音鳴らしスレッド関数
 def beep_sound():
-    logger.info('[EXEC] Amperage alarm !')
     while True:
         if inst_mode != 'good':  # タイムアウトで表示ミュートされてるか、初期値のままならpass
             pass
@@ -152,7 +141,6 @@ def print_b(text, x, y, col, w):
 
 # 【exec】　ページめくり処理スレッド関数
 def flip_page(direction):
-    logger.info('[EXEC] Flip page.')
     global page
 
     # ボタンが押されるたびにページを進める/戻す
@@ -162,8 +150,10 @@ def flip_page(direction):
     elif page == -1:
         page = len(draw_page) - 1
 
-    # ボタンエリア以外は一旦画面全消し、ページ再描画
+    # ボタンエリア以外は一旦画面全消し
     lcd.rect(0, 0, 320, 224, BG_COLOR, BG_COLOR)
+
+    # 当該ページを表示
     draw_page[page]()
 
     # オートローテーションのタイマーをリセット
@@ -182,11 +172,11 @@ def auto_rotation(direction):
     if auto_rotation_sw is False:  # スタート
         rotation_timer.init(period=int(config['ROTATION_INTERVAL'] * 1000),
                             mode=rotation_timer.PERIODIC, callback=lambda t: flip_page(direction))
-        logger.info('[EXEC] Auto_rotation On')
+        logger.info('[EXEC] auto_rotation on')
         auto_rotation_sw = True
     else:  # ストップ
         rotation_timer.deinit()
-        logger.info('[EXEC] Auto_rotation Off')
+        logger.info('[EXEC] auto_rotation off')
         auto_rotation_sw = False
 
     draw_cumul()
@@ -205,6 +195,7 @@ def init_screen():
     if sum(hist_flag) == data_period + 1:
         lcd.circle(310, 232, 8, 0x1f77b4, 0x1f77b4)
     lcd.setBrightness(config['LCD_BRIGHTNESS'])  # バックライト輝度設定
+    logger.info('[INIT] Screen init OK')
 
 
 # 【draw】　BEEPアイコン描画
@@ -247,7 +238,10 @@ def draw_cumul():
         col = 0x1f77b4
     lcd.rect(0, 224, 229, 240, 0x303030, 0x303030)
     lcd.font(lcd.FONT_Default)
-    lcd.print(created_date + ' ' + created_time, 2, 227, col)
+    if cumul_date == '':
+        lcd.print('****-**-** **:**', 2, 227, col)
+    else:
+        lcd.print(cumul_date + ' ' + cumul_time, 2, 227, col)
 
 
 # 【page】　メインページ：瞬間電力値、検針日以降の電力量、電気代
@@ -265,13 +259,13 @@ def draw_main():
     # 今月（検針日を起点）の電力量の表示
     (x, y, w, h) = (0, 150, 140, 40)
     lcd.rect(x, y, w, h, BG_COLOR, BG_COLOR)
-    if monthly_e_energy == 0:
-        monthly_e_energy_d = '-'
+    if e_energy == 0:
+        e_energy_d = '-'
     else:
-        monthly_e_energy_d = str(int(monthly_e_energy))
+        e_energy_d = str(int(e_energy))
     lcd.font(lcd.FONT_DejaVu40)
-    len_txt = lcd.textWidth(monthly_e_energy_d)
-    lcd.print(monthly_e_energy_d, x + w - len_txt - 20, y + 5, color2)
+    len_txt = lcd.textWidth(e_energy_d)
+    lcd.print(e_energy_d, x + w - len_txt - 20, y + 5, color2)
 
     # 今月（検針日を起点）の電気料金の表示
     (x, y, w, h) = (140, 150, 180, 40)
@@ -366,7 +360,7 @@ def draw_graph_1():
         if (hist_data[1][n + 1] == 0) or (hist_data[1][n] == 0):
             h_power_yesterday = 0
         else:
-            h_power_yesterday = round((hist_data[1][n + 1] - hist_data[1][n]) * UNIT, 1)
+            h_power_yesterday = round((hist_data[1][n + 1] - hist_data[1][n]) / 1000, 1)
 
         if h_power_yesterday <= 0:  # マイナス値は有り得ないが念のため
             height_yesterday = 0
@@ -380,7 +374,7 @@ def draw_graph_1():
         if (hist_data[0][n + 1] == 0) or (hist_data[0][n] == 0):
             h_power_today = 0
         else:
-            h_power_today = round((hist_data[0][n + 1] - hist_data[0][n]) * UNIT, 1)
+            h_power_today = round((hist_data[0][n + 1] - hist_data[0][n]) / 1000, 1)
 
         if h_power_today <= 0:  # マイナス値は有り得ないが念のため
             height_today = 0
@@ -417,9 +411,6 @@ def draw_graph_1():
         if height_today_delta != 0:  # 前日と当日の差分バー描画
             lcd.rect(x_start, 205 - height_today, width,
                      height_today_delta, color_delta, color_delta)
-            
-    gc.collect()
-
 
 
 # 【page】　電力量グラフ (直近7日間) 表示
@@ -458,20 +449,20 @@ def draw_graph(draw_period, bar_width, bar_pitch, gr_start, av_start):
     avg_sub_t = 0                          # 平均の現在時刻までの小計
     avg_cumul = 0                          # 平均の終日合計
 
-    if created_time:
+    if cumul_time:
         # データ集計セクション
-        if TIME_TB.index(created_time) == 0:
+        if TIME_TB.index(cumul_time) == 0:
             index = 48
         else:
-            index = TIME_TB.index(created_time)
+            index = TIME_TB.index(cumul_time)
 
         if hist_data[0][0]:
-            today_sub_t = round((hist_data[0][index] - hist_data[0][0]) * UNIT, 1)
+            today_sub_t = round((hist_data[0][index] - hist_data[0][0]) / 1000, 1)
 
         for n in range(1, draw_period + 1):
             if hist_data[n][0]:
-                daily_sub_t[n] = round((hist_data[n][index] - hist_data[n][0]) * UNIT, 1)
-                daily_cumul[n] = round((hist_data[n][48] - hist_data[n][0]) * UNIT, 1)
+                daily_sub_t[n] = round((hist_data[n][index] - hist_data[n][0]) / 1000, 1)
+                daily_cumul[n] = round((hist_data[n][48] - hist_data[n][0]) / 1000, 1)
 
         avg_period = sum(hist_flag) - 1    # データ取得完了前の場合は、取得日までの平均を算出する
 
@@ -600,13 +591,13 @@ def draw_table(calc_period, caption, col_caption):
             if (hist_data[i][nn + 2] == 0) or (hist_data[i][nn] == 0):
                 hour_power[i][n] = 0
             else:  # 1時間あたりの定時積算電力量（単位：kWh）
-                hour_power[i][n] = round((hist_data[i][nn + 2] - hist_data[i][nn]) * UNIT, 1)
+                hour_power[i][n] = round((hist_data[i][nn + 2] - hist_data[i][nn]) / 1000, 1)
 
             if ((hist_data[i][nn + 24 + 2] == 0) or (hist_data[i][nn + 24] == 0)):
                 hour_power[i][n + 12] = 0
             else:  # 1時間あたりの定時積算電力量（単位：kWh）
                 hour_power[i][n + 12] = round((hist_data[i][nn + 24 + 2]
-                                               - hist_data[i][nn + 24]) * UNIT, 1)
+                                               - hist_data[i][nn + 24]) / 1000, 1)
 
     avg_period = sum(hist_flag) - 1  # データ取得完了前の場合は、取得日までの平均を算出する
 
@@ -659,11 +650,11 @@ def draw_table(calc_period, caption, col_caption):
         lcd.print(diff_PM_str, 315 - lcd.textWidth(diff_PM_str), (n + 1) * 16, color=color_diff_PM)
 
     # 当日(現時刻まで)および期間平均の24時間積算電力量と、比(%)を最下段に表示
-    if created_time:
-        if TIME_TB.index(created_time) == 0:
+    if cumul_time:
+        if TIME_TB.index(cumul_time) == 0:
             index = 24
         else:
-            index = int(TIME_TB.index(created_time) / 2)
+            index = int(TIME_TB.index(cumul_time) / 2)
 
         hist_data_of_avg = 0
         hist_data_of_Today = 0
@@ -700,10 +691,9 @@ def draw_table(calc_period, caption, col_caption):
     gc.collect()
 
 
-
 # 【config】　設定用GSSから設定をリロード
 def reload_config(config):
-    global DAY_GRAPH_SCALE, GRAPH_SCALE, BG_COLOR, UNIT
+    global DAY_GRAPH_SCALE, GRAPH_SCALE, BG_COLOR, unit
 
     lcd.clear()
     lcd.font(lcd.FONT_DejaVu18)
@@ -711,7 +701,7 @@ def reload_config(config):
 
     config = cnfg.update_config_from_gss(api_config, config)
     cnfg.save_config(config)
-    DAY_GRAPH_SCALE, GRAPH_SCALE, BG_COLOR, UNIT = cnfg.set_config(config)
+    DAY_GRAPH_SCALE, GRAPH_SCALE, BG_COLOR, unit = cnfg.set_config(config)
 
     log_level = getattr(logging, config['LOG_LEVEL'], None)
     logging.basicConfig(level=log_level)
@@ -723,8 +713,7 @@ def reload_config(config):
 
 # 【exec】　積算電力-履歴データ取得
 def get_hist_data():
-    global hist_day, hist_flag, hist_date, hist_data, req_flag
-    # global UNIT
+    global hist_day, hist_flag, hist_date, unit, hist_data, day_shift
 
     logger.info('[INIT] Get Historical DATA')
 
@@ -732,9 +721,9 @@ def get_hist_data():
     hist_flag = [False] * (data_period + 1)
     hist_date = ['**/**'] * (data_period + 1)
     hist_data = [[0 for i in range(49)] for j in range(data_period + 1)]
-    req_flag = [False] * (data_period + 2)
+    day_shift = 0
 
-    # UNIT = None  # << UNIT を取得する場合
+    # unit = None  # << unut*coefficient を取得する場合
 
     init_screen()
     indicator_timer.deinit()
@@ -754,9 +743,6 @@ if __name__ == '__main__':
         wifiCfg.wlan_ap.active(True)
         espnow.init(0)
 
-        # Start checking the WiFi connection
-        checkWiFi_timer.init(period=60 * 1000, mode=checkWiFi_timer.PERIODIC, callback=checkWiFi)
-
         lcd.clear()
         lcd.println('Welcome to SMM3 !', 0, 0, color=0xFFFFFF)
 
@@ -765,7 +751,7 @@ if __name__ == '__main__':
         api_config = cnfg.get_api_config()
         config = cnfg.update_config_from_gss(api_config, config)
         cnfg.save_config(config)
-        DAY_GRAPH_SCALE, GRAPH_SCALE, BG_COLOR, UNIT = cnfg.set_config(config)
+        DAY_GRAPH_SCALE, GRAPH_SCALE, BG_COLOR, unit = cnfg.set_config(config)
 
         log_level = getattr(logging, config['LOG_LEVEL'], None)
         logging.basicConfig(level=log_level)
@@ -773,7 +759,7 @@ if __name__ == '__main__':
 
         # RTC設定（時刻設定）
         ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)
-        status('Set Time.')
+        status('RTC init OK.')
 
         # ページ設定
         draw_page = [
@@ -802,43 +788,41 @@ if __name__ == '__main__':
         btnC.pressFor(0.8, get_hist_data)
         status('Button thread start.')
 
-        # BEEP音鳴らしスレッド起動
-        _thread.start_new_thread(beep_sound, ())
-        status('BEEP thread start.')
-
-        status('== Start monitoring ==')
-        utime.sleep(3)
+        utime.sleep(5)
 
         # データ取得処理
         hist_day = 0
         hist_flag = [False] * (data_period + 1)
         hist_date = ['**/**'] * (data_period + 1)
         hist_data = [[0 for i in range(49)] for j in range(data_period + 1)]
-        req_flag = [False] * (data_period + 2)
+        day_shift = 0
 
-        # UNITをメーターからの取得値によらず固定としている (UNIT)
-        UNIT = config['UNIT']
+        # unitをメーターからの取得値によらず固定としている (unit*coefficient)
+        unit = config['UNIT']
 
         # 表示値初期値
         wattage = 0
         amperage = 0
         e_energy = 0
-        monthly_e_energy = 0
         charge = 0
-        collect = '****-**-** **:**:**'
-        created = '****-**-** **:**:**'
-        created_date = '****-**-**'
-        created_time = '**:**'
+        collect = '****-**-**'
+        created = '*****-**-**'
+        cumul_date = ''
+        cumul_time = ''
+        data_date = ''
+        data_time = ''
 
-        # タイマー初期化
+        # タイマー処理
         wattage_time = utime.time()
-        req_time = utime.time() - 120
+
+        # BEEP音鳴らしスレッド起動
+        _thread.start_new_thread(beep_sound, ())
+        status('BEEP thread start.')
 
         # 画面初期化
         init_screen()
         indicator_timer.deinit()
         indicator_timer.init(period=200, mode=indicator_timer.PERIODIC, callback=draw_indicator)
-
 
         # メインループ
         while True:
@@ -849,150 +833,148 @@ if __name__ == '__main__':
                     inst_mode = 'lost'
                     draw_w_a()
 
-            # # 'UNIT' 積算電力量-[単位x係数]をリクエスト  << UNIT を取得する場合
-            # if UNIT is None:
+            # # 'UNIT' 積算電力量-[単位x係数]をリクエスト  << unit*coefficient を取得する場合
+            # if unit is None:
             #     espnow.broadcast(data='UNIT')
             #     logger.info('[UNIT] -> Request UNIT')
 
             # 'REQ' 積算電力量-履歴データをリクエスト
-            if hist_day == 0:
-                init_time = utime.time()
-            if req_flag[hist_day] is False and hist_day <= data_period:
+            if (sum(hist_flag) < (data_period + 1)):  # and unit:
                 espnow.broadcast(data='REQ' + '{:02}'.format(hist_day))
-                req_flag[hist_day] = True
-                req_time = utime.time()
                 logger.debug('[SENT] -> Key = [REQ%2d]', hist_day)
-            elif utime.time() - req_time > 30:  # 指定秒数、リプライがなけらば再リクエスト
-                req_flag[hist_day] = False
 
             # # 'UNIT' 積算電力量-[単位x係数]をリクエスト
-            # if UNIT is None:
+            # if unit is None:
             #     if request_UNIT is False:
             #         espnow.broadcast(data='UNIT')
             #         logger.info('[UNIT] -> Request UNIT')
             #         request_UNIT = True
 
-            # 【RCEV】 親機からデータを受信(ESP NOW)
+            # 親機からデータを受信(ESP NOW)
             d = espnow.recv_data()
+
+            # 受信データ処理
             if (len(d[2]) > 0):
-                header = str(d[2][:2].decode().strip())  # 先頭2文字が header
-                if header == 'M:':  # 親機からのデータ 'M:〜' のみ処理
-                    r_key = str(d[2][2:6].decode().strip())  # 2-5文字が key
-                    r_data = d[2][6:].strip()  # 6文字以降がデータ
-                    logger.info('[RECV] <- Key = [%s]', r_key)
+                r_key = str(d[2][:4].decode().strip())  # 先頭4文字が key
+                r_data = d[2][4:].strip()
 
-                    # 【BOOT】 親機起動時処理 : 履歴データ再取得
-                    if r_key == 'BOOT':
-                        get_hist_data()
+                logger.debug('[RECV] <- Key = [%s]', r_key)
 
-                    # 【TOUT】 親機〜スマートメーター間タイムアウト通知受信処理
-                    elif r_key == 'TOUT':
-                        if inst_mode != 'timeout':
-                            inst_mode = 'timeout'
-                            draw_w_a()
+                # 親機起動時処理 : 履歴データ再取得
+                if r_key == 'BOOT':
+                    logger.info('[INIT] Master booted.')
+                    get_hist_data()
 
-                    # # 【UNIT】 積算電力量-[単位x係数]受信処理  << UNIT を取得する場合
-                    # elif r_key == 'UNT=':
-                    #     UNIT = float(r_data.decode())
-                    #     logger.info('[UNIT] <- UNIT = %s', UNIT)
-                    #     request_UNIT = False
-
-                    # 【HIST】 積算電力量-履歴データ受信処理
-                    elif r_key[:2] == 'ID':
-                        id = int(r_key[2:4].strip())
-                        d1 = r_data[:24].decode('utf-8').strip()
-                        _created_date = d1[:10]
-                        _created_time = d1[11:16]
-                        _hist_date = d1[19:24]
-                        _data = binascii.hexlify(r_data[24:]).decode('utf-8').strip()
-
-                        if (id == 0) and created_time == '':
-                            cumul_date = _created_date
-                            cumul_time = _created_time
-
-                        if (id == hist_day):  # and UNIT:  # 受信データ = 要求日のデータ なら
-                            if hist_flag[id] is False:  # 要求日のデータが存在しなければ、受信処理
-                                for k in range(0, 49):
-                                    if int(_data[(k * 8):(k * 8) + 8], 16) > 0x05f5e0ff:
-                                        hist_data[id][k] = 0  # 0x05f5e0ff(99999999) 超えなら 0
-                                    else:
-                                        hist_data[id][k] = int(_data[(k * 8):(k * 8) + 8], 16)
-                                hist_date[id] = _hist_date
-                                hist_flag[id] = True
-
-                                logger.info('[HIST] <- [(%d) %s %s [%s %.1f - %.1f : %.1f]]',
-                                            id, _created_date, _created_time,
-                                            hist_date[id],
-                                            hist_data[id][0] * UNIT,
-                                            hist_data[id][47] * UNIT,
-                                            hist_data[id][48] * UNIT)
-                                logger.debug('[HIST] <- Raw = %s', hist_data[id])
-
-                                draw_page[page]()  # ページ再描画
-                                draw_cumul()
-
-                                if sum(hist_flag) == data_period + 1:
-                                    beep()
-                                    t = utime.time() - init_time
-                                    logger.info('[HIST] Data acquisition completed. time = %d', t)
-                                    indicator_timer.deinit()
-                                    lcd.circle(310, 232, 8, 0x1f77b4, 0x1f77b4)
-
-                            hist_day += 1
-
-                    # 【INST】 瞬間電力値・瞬間電流値受信処理
-                    elif r_key == 'INST':
-                        wattage_time = utime.time()
-                        inst_data = r_data.decode().strip().split('/')
-                        wattage = int(inst_data[0])
-                        amperage = float(inst_data[1])
-                        inst_mode = 'good'
-
+                # 親機〜スマートメーター間タイムアウト通知受信処理
+                elif r_key == 'TOUT':
+                    if inst_mode != 'timeout':
+                        inst_mode = 'timeout'
                         draw_w_a()
-                        logger.info('[INST] <- %s', inst_data)
 
-                    # 【CUML】 積算電力量受信処理
-                    elif r_key == 'CUML':
-                        cumul_data = r_data.decode().strip().split('/')
-                        collect = cumul_data[0]  # 直近の検針日時
-                        created = cumul_data[1]
-                        created_date = created.strip().split(' ')[0]  # 定時積算電力取得日
-                        created_time = created.strip().split(' ')[1][:5]  # 定時積算電力取得時刻
-                        e_energy = round(float(cumul_data[2]), 1)  # 積算電力量
-                        monthly_e_energy = round(float(cumul_data[3]), 1)  # 今月の電力量(created_dateまで)
-                        charge = cumul_data[4]  # 今月の電気料金(created_dateまで)
+                # # 積算電力量-[単位x係数]受信処理  << unit*coefficient を取得する場合
+                # elif r_key == 'UNT=':
+                #     unit = float(r_data.decode())
+                #     logger.info('[UNIT] <- UNIT = %s', unit)
+                #     request_UNIT = False
 
-                        logger.info('[CUML] <- %s', cumul_data)
+                # 積算電力量-履歴データ受信処理
+                elif r_key[:2] == 'ID':
+                    id = int(r_key[2:4].strip())
+                    d2 = binascii.hexlify(r_data[19:]).decode('utf-8').strip()
+                    data_date = r_data[:10].decode('utf-8').strip()
+                    data_time = r_data[11:16].decode('utf-8').strip()[:5]
 
-                        # 日跨ぎ処理
-                        if TIME_TB.index(created_time) == 0:
-                            hist_data[0][48] = int(e_energy / UNIT)  # 00:00のデータなら、当日24:00のデータに
-                        else:
-                            # 00:30のデータ かつ 当日01:00のデータがある（日跨ぎ処理未実施）なら、日跨ぎ処理を行う
-                            if (TIME_TB.index(created_time) == 1) and (hist_data[0][2] != 0):
-                                for id in range(data_period, 0, -1):
-                                    hist_data[id] = hist_data[id - 1]  # 履歴データシフト
-                                    hist_date[id] = hist_date[id - 1]  # 履歴日付けシフト
-                                hist_data[0] = [0] * 49  # 当日のデータをクリア
-                                hist_date[0] = date_of_days_ago(created_date, 0)
-                                hist_data[0][0] = hist_data[1][48]  # 前日（シフト後)24:00 → 当日00:00
-                                hist_flag[hist_day] = True
-                                logger.info('[EXEC] Day-to-Day processed!')
-                                ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)  # 時計合わせ
-                            # 履歴データ → hist_data
-                            hist_data[0][TIME_TB.index(created_time)] = int(e_energy / UNIT)
+                    if TIME_TB.index(data_time) == 0:  # 履歴データ取得時刻が00:00の場合は基準日を1日シフト
+                        day_shift = 1                  # 日跨ぎ処理でシフト解消
 
-                        # ページ再描画
-                        draw_page[page]()
-                        draw_cumul()
+                    if (id - day_shift == 0) and cumul_time == '':
+                        cumul_date = data_date
+                        cumul_time = data_time
 
+                    if (day_shift == 1) and (id == 0) and (hist_day == 0):
+                        hist_data[0][48] = int(int(d2[0:8], 16) * unit * 1000)
+                        hist_day = 1
+
+                    if (id == hist_day):  # and unit:  # 受信データ = 要求日のデータ なら
+                        if hist_flag[id - day_shift] is False:  # 要求日のデータが存在しなければ、受信処理
+                            for k in range(0, 48):
+                                if int(d2[(k * 8):(k * 8) + 8], 16) > 0x05f5e0ff:  # =99999999
+                                    hist_data[id - day_shift][k] = 0
+                                else:
+                                    hist_data[id - day_shift][k] = int(int(d2[(k*8):(k*8) + 8], 16)
+                                                                       * unit * 1000)
+                            hist_date[id - day_shift] = date_of_days_ago(data_date, id)
+                            hist_flag[id - day_shift] = True
+                            if id - day_shift < data_period:
+                                hist_data[id - day_shift + 1][48] = hist_data[id - day_shift][0]
+
+                            logger.info('[HIST] <- [(%d-%d) %s %s [%s %.1f - %.1f : %.1f]]', 
+                                        id, day_shift, data_date, data_time,
+                                        hist_date[id - day_shift],
+                                        hist_data[id - day_shift][0] / 1000,
+                                        hist_data[id - day_shift][47] / 1000,
+                                        hist_data[id - day_shift][48] / 1000)
+                            logger.debug('[HIST] <- Raw = %s', hist_data[id - day_shift])
+
+                            draw_page[page]()  # ページ再描画
+                            draw_cumul()
+
+                            if sum(hist_flag) == data_period + 1:
+                                beep()
+                                indicator_timer.deinit()
+                                lcd.circle(310, 232, 8, 0x1f77b4, 0x1f77b4)
+
+                        hist_day += 1
+
+                # 積算電力量受信処理
+                elif r_key == 'CUML':
+                    cumul_data = r_data.decode().strip().split('/')
+                    cumul_wh = int(float(cumul_data[0]) * 1000)  # 積算電力量
+                    created = cumul_data[1]
+                    cumul_date = created.strip().split(' ')[0]  # 定時積算電力取得日
+                    cumul_time = created.strip().split(' ')[1][:5]  # 定時積算電力取得時刻
+                    collect = cumul_data[2]  # 直近の検針日時
+                    e_energy = float(cumul_data[3])  # 今月の電力量(cumul_dateまで)
+                    charge = cumul_data[4]  # 今月の電気料金(cumul_dateまで)
+
+                    logger.info('[CUML] <- %s', cumul_data)
+
+                    # 日跨ぎ処理
+                    if TIME_TB.index(cumul_time) == 0:
+                        hist_data[0][48] = cumul_wh  # 00:00のデータなら、当日24:00のデータとする
+                    else:
+                        # 00:30のデータ かつ 当日01:00のデータがある（日跨ぎ処理未実施）なら、日跨ぎ処理を行う
+                        if (TIME_TB.index(cumul_time) == 1) and (hist_data[0][2] != 0):
+                            for id in range(data_period, 0, -1):
+                                hist_data[id] = hist_data[id - 1]  # 履歴データシフト
+                                hist_date[id] = hist_date[id - 1]  # 履歴日付けシフト
+                            hist_data[0] = [0] * 49  # 当日のデータをクリア
+                            hist_date[0] = date_of_days_ago(cumul_date, 0)
+                            hist_data[0][0] = hist_data[1][48]  # 前日（シフト後)24:00 → 当日00:00
+                            hist_flag[hist_day - 1] = True
+                            day_shift = 0
+                            logger.info('[EXEC] Day-to-Day processed!')
+                        hist_data[0][TIME_TB.index(cumul_time)] = cumul_wh  # 履歴データ → hist_data
+
+                    # ページ再描画
+                    draw_page[page]()
+                    draw_cumul()
+
+                # 瞬間電力値・瞬間電流値受信処理
+                elif r_key == 'INST':
+                    wattage_time = utime.time()
+                    inst_data = r_data.decode().strip().split('/')
+                    wattage = int(inst_data[0])
+                    amperage = float(inst_data[1])
+                    inst_mode = 'good'
+
+                    draw_w_a()
+                    logger.info('[INST] <- %s', inst_data)
+
+            utime.sleep(1)
             gc.collect()
-            # utime.sleep(0.5)
-            # print('[SYS_] mem_free_end = {} byte'.format(gc.mem_free()))
+            # print('[SYS_] mem_free = {} byte'.format(gc.mem_free()))
 
     except Exception as e:
-        logger.error('[ERR.] == Final Exception ==: %s', e)
-
-    finally:
-        logger.critical('[SYS_] == system reset ==')
-        reset()
+        logger.error(e)
+        machine.reset()
