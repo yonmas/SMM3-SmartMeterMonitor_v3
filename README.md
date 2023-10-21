@@ -125,6 +125,7 @@ Step-2. [設定用GSSのAPI設定読み込み（SMM_API_config）](https://docs.
 
 * Aボタン　　　：上下反転
 * Aボタン長押し：設定用GSSから設定読込み
+* Bボタン長押し：履歴データ再取得 (new!)
 
 ### 子機
 
