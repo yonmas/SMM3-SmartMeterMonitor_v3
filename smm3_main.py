@@ -750,7 +750,6 @@ if __name__ == '__main__':
                     _created_time = _created[11:16]
 
                     if _created_time == '00:00' and day_shift == 0:
-                        hist_data[hist_day][48] = int(_data[:8], 16)
                         day_shift = 1
 
                     elif hist_flag[hist_day] is False:   # 要求日のデータが存在しなければ、受信処理
