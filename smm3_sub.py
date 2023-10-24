@@ -458,7 +458,7 @@ def draw_graph(draw_period, bar_width, bar_pitch, gr_start, av_start):
     avg_sub_t = 0                          # 平均の現在時刻までの小計
     avg_cumul = 0                          # 平均の終日合計
 
-    if created_time:
+    if created_time != '**:**':
         # データ集計セクション
         if TIME_TB.index(created_time) == 0:
             index = 48
