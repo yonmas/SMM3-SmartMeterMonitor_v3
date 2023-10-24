@@ -977,6 +977,8 @@ if __name__ == '__main__':
                                 hist_date[0] = date_of_days_ago(created_date, 0)
                                 hist_data[0][0] = hist_data[1][48]  # 前日（シフト後)24:00 → 当日00:00
                                 hist_flag[hist_day] = True
+                                if hist_day < data_period:
+                                    hist_day += 1
                                 logger.info('[EXEC] Day-to-Day processed!')
                                 ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)  # 時計合わせ
                             # 履歴データ → hist_data

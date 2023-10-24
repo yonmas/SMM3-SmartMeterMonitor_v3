@@ -659,7 +659,7 @@ if __name__ == '__main__':
                 cumul_time = utime.time()
                 if result is True:
                     created_date = created[:10]
-                    created_time = created[11:16] 
+                    created_time = created[11:16]
                     retries = 0
                     cumul_flag = True
                     
@@ -677,6 +677,8 @@ if __name__ == '__main__':
                             hist_date[0] = date_of_days_ago(created_date, 0)
                             hist_data[0][0] = hist_data[1][48]  # 前日（シフト後)24:00 → 当日00:00
                             hist_flag[hist_day] = True
+                            if hist_day < data_period:
+                                hist_day += 1
                             day_shift = 0
                             logger.info('[EXEC] Day-to-Day processed!')
                             ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)  # 時計合わせ
@@ -753,6 +755,7 @@ if __name__ == '__main__':
                         if hist_day == 0:
                             hist_data[hist_day][48] = int(_data[:8], 16)
                         day_shift = 1
+                        utime.sleep(30)  # スマートメーターの日跨ぎ処理タイムラグを解消するため
 
                     elif hist_flag[hist_day] is False:   # 要求日のデータが存在しなければ、受信処理
                         for k in range(0, 48):
