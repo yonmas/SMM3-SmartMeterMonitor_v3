@@ -938,8 +938,7 @@ if __name__ == '__main__':
                                     indicator_timer.deinit()
                                     lcd.circle(310, 232, 8, 0x1f77b4, 0x1f77b4)
 
-                            if hist_day < data_period:
-                                hist_day += 1
+                            hist_day += 1
 
                     # 【INST】 瞬間電力値・瞬間電流値受信処理
                     elif r_key == 'INST':
@@ -977,7 +976,8 @@ if __name__ == '__main__':
                                 hist_data[0] = [0] * 49  # 当日のデータをクリア
                                 hist_date[0] = date_of_days_ago(created_date, 0)
                                 hist_data[0][0] = hist_data[1][48]  # 前日（シフト後)24:00 → 当日00:00
-                                hist_flag[hist_day] = True
+                                if hist_day <= data_period:
+                                    hist_flag[hist_day] = True
                                 if hist_day < data_period:
                                     hist_day += 1
                                 logger.info('[EXEC] Day-to-Day processed!')
