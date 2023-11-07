@@ -938,7 +938,8 @@ if __name__ == '__main__':
                                     indicator_timer.deinit()
                                     lcd.circle(310, 232, 8, 0x1f77b4, 0x1f77b4)
 
-                            hist_day += 1
+                            if hist_day < data_period:
+                                hist_day += 1
 
                     # 【INST】 瞬間電力値・瞬間電流値受信処理
                     elif r_key == 'INST':
