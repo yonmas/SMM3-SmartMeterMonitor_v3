@@ -38,9 +38,9 @@ page = 0
 auto_rotation_sw = False  # オートローテーションのスイッチ
 
 # タイマー
-rotation_timer = Timer(2)
-indicator_timer = Timer(3)
-checkWiFi_timer = Timer(4)
+rotation_timer = Timer(0)
+indicator_timer = Timer(2)
+checkWiFi_timer = Timer(3)
 
 # 履歴データを取得する期間（日）
 data_period = 30
