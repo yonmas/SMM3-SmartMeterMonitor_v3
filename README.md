@@ -1,13 +1,12 @@
 # SMM3 : Smart Meter Monitor v.3
 
 ## お知らせ
-子機のグラフ表示に使う履歴データをスマートメータから取得するロジックを根本的に見直しました。また、内部処理に挿入していたウェイトを、動作に影響がないと思われる範囲で削減。結果として、初期化時にかかる時間を大幅に短縮しました。
+M5Stack Core2 に対応する子機用プログラムを追加しました。Basic用とCore2用、それぞれ使用機器に合わせてインストールしてください。
 
-【見直し前】子機からのリクエストに応じて、その都度、親機がスマートメーターから履歴データを取得・転送していました。  
-【見直し後】親機の起動時にスマートメーターから履歴データを取得して、親機内に保存、随時更新。子機からのリクエスには、親機内に保存している履歴データを送信するようにしました。  
+Wi-Fi接続確認のルーチンが作動していなかったのを修正しました。他、細かいバグを修正しました。
 
-親機の履歴データを再取得するため、[Bボタン長押し] を追加しました。その際には、自動的に子機の履歴データも更新されます。
-(2023/10/21)
+設定用Googleスプレッドシート（設定用GSS）の構成を変更しました。最新版のプログラムと設定用GSSの組み合わせで利用してください。BasicとCore2で、画面の明るさ設定項目が異なるので注意してください。
+(2024/04/10)
 
 ---
 **M5Stackで電力使用量を「見える化」して電気代を節約しよう！**
@@ -18,13 +17,13 @@
 
 **「[細かいこと](https://docs.google.com/spreadsheets/d/1qYsY8ZOpj6FxqoebCQnvBFYSL8rCK7r_A7R3m9bF7MY/edit#gid=158599453)」** はいいから、とりあえず使ってみたいという場合は、以下の手順で。
 
-1. M5Stack Basic と M5StickC Plus を準備して、M5StickC Plus に BP35A1 を組み込んでください。**[2.使用機器]** 参照。
-1. **[4.ファイル構成]** に従って、必要なファイルを M5Stack/M5StickC にインストールしてください。  
+1. M5Stack Basic/Core2 と M5StickC Plus を準備して、M5StickC Plus に BP35A1 を組み込んでください。**[2.使用機器]** 参照。
+1. **[4.ファイル構成]** に従って、必要なファイルを 親機：M5StickC、子機：M5Stack にインストールしてください。  
 1. **[5.初期設定]** に従って、機器の初期設定を行ってください。
 
 ## 1. 概要
 
-M5StickC Plus + Wi-SUNモジュール BP35A1 で、家庭のスマートメーターから電力使用量のデータを取得して、M5Stackの画面ににいろいろ表示します。前日、直近7日間、直近30日間の電力使用量との比較をグラフ化。眺めていると、ついつい節電したくなるはずです。
+親機：M5StickC Plus + Wi-SUNモジュール BP35A1 で、家庭のスマートメーターから電力使用量のデータを取得して、子機：M5Stackの画面ににいろいろ表示します。前日、直近7日間、直近30日間の電力使用量との比較をグラフ化。眺めていると、ついつい節電したくなるはずです。
 
 ### 以前のバージョンからの変更点：
 
@@ -51,14 +50,15 @@ M5StickC Plus + Wi-SUNモジュール BP35A1 で、家庭のスマートメー�
 親機のシステムと全体の表示形式は、 @miyaichi さんのコードをベースにしています。  
 <https://github.com/miyaichi/SmartMeter>
 
-（子機：M5Stack Basic のファームは、**V1.10.2** 以降としてください。）
+（子機：M5Stack Basic/Core2 のファームは、**V1.10.2** 以降としてください。）
 
 ## 2. 使用機器
 
-- 親機：M5StickC Plus --> [スイッチサイエンス](https://www.switch-science.com/catalog/6470/)
-- 子機：M5Stack Basic --> [スイッチサイエンス](https://www.switch-science.com/catalog/7362/)  
+- 親機：M5StickC Plus --> [スイッチサイエンス](https://www.switch-science.com/products/6470/)
+- 子機：M5Stack Basic --> [スイッチサイエンス](https://www.switch-science.com/products/9010/)  
+- 子機：M5Stack Core2 --> [スイッチサイエンス](https://www.switch-science.com/products/9349/)  
 - BP35A1 モジュール --> [チップワンストップ](https://www.chip1stop.com/view/searchResult/SearchResultTop?classCd=&did=&cid=netcompo&keyword=BP35A1&utm_source=netcompo&utm_medium=buyNow)
-- Wi-SUN HAT --> [スイッチサイエンス](https://www.switch-science.com/catalog/7612/)
+- Wi-SUN HAT --> [スイッチサイエンス](https://www.switch-science.com/products/7612/)
 
 ※ M5Stick および M5Stack を電源に繋いで長期運用する場合は、バッテリーを撤去した方が安心かもしれません。  
 ※ 親機だけでも動きますが、子機を追加することで、より多様なデータ表示が実現できます。  
@@ -93,14 +93,17 @@ Ambient でアカウントを作成し、チャネルを作成。チャネルID�
 ```
 
 ```text
-■■ 子機(sub)：M5Stack Basic ■■ 
+■■ 子機(sub)：M5Stack Basic/Core2 ■■ 
+※ Basic用とCore2用、それぞれ専用のプログラムを使用してください。
 ※ M5Stack Basic のファームは、V1.10.2 以降としてください。
 
 /apps/
-  +- smm3_sub.py (子機メインプログラム)
+  +- smm3_sub.py (子機メインプログラム　※Basic用)
+  +- smm3_sub_core2.py (子機メインプログラム　※Core2用)
 
 /（ルート）
-  +- func_sub.py (外部モジュール)
+  +- func_sub.py (外部モジュール　※Basic用)
+  +- func_sub_core2.py (外部モジュール　※Core2用)
   +- logging.py (別途準備)
   ===== 以下のファイルはGSSによる設定を行わない場合のみ使用 =====
   +- api_config.json (オプション：設定用GoogleスプレッドシートのAPI情報)
@@ -141,5 +144,12 @@ Step-2. [設定用GSSのAPI設定読み込み（SMM_API_config）](https://docs.
 **[GoogleスプレッドシートのReademe](https://docs.google.com/spreadsheets/d/1qYsY8ZOpj6FxqoebCQnvBFYSL8rCK7r_A7R3m9bF7MY/edit#gid=158599453)** に、もう少し細かい情報を書き記しているので、参考にしてください。
 
 ## お知らせ履歴
+子機のグラフ表示に使う履歴データをスマートメータから取得するロジックを根本的に見直しました。また、内部処理に挿入していたウェイトを、動作に影響がないと思われる範囲で削減。結果として、初期化時にかかる時間を大幅に短縮しました。
+
+【見直し前】子機からのリクエストに応じて、その都度、親機がスマートメーターから履歴データを取得・転送していました。  
+【見直し後】親機の起動時にスマートメーターから履歴データを取得して、親機内に保存、随時更新。子機からのリクエスには、親機内に保存している履歴データを送信するようにしました。  
+
+親機の履歴データを再取得するため、[Bボタン長押し] を追加しました。その際には、自動的に子機の履歴データも更新されます。
+(2023/10/21)
 
 一部の設定用変数名を変更しました。最新のコードと設定用GSSをご利用ください！！(2023/10/10)

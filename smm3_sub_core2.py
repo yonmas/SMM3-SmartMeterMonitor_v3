@@ -1,4 +1,5 @@
 from m5stack import lcd, speaker, btnA, btnB, btnC
+from m5stack_ui import *
 from machine import Timer, reset
 import _thread
 import binascii
@@ -9,13 +10,13 @@ import math
 import ntptime
 import utime
 import wifiCfg
-from func_sub import beep, status
-import func_sub as cnfg
+from func_sub_core2 import beep, status
+import func_sub_core2 as cnfg
 
 # 定数初期値 : 優先順位　 　設定GSS > 設定ファイル > 初期値
 config = {
     'WARNING_AMPERAGE': 30,   # 警告アンペア(A)
-    'LCD_BRIGHTNESS': 15,     # 画面の明るさ(0〜255)
+    'LCD_BRIGHTNESS_C2': 70,  # 画面の明るさ(0〜100)
     'BG_COLOR': 0x102030,     # 背景色(RGB)
     'ROTATION_INTERVAL': 15,  # オートローテーション間隔(秒)
     'DAY_GRAPH_SCALE': 1.0,   # 当日・前日比較グラフ：縦軸(kWh)
@@ -131,7 +132,7 @@ def checkWiFi(arg):
             reset()
 
 
-# 【exec】　BEEP音鳴らしスレッド関数
+# 【exec】　BEEP音鳴らしスレッド関数 ※うまくいかないため、機能を停止しています
 def beep_sound():
     logger.info('[EXEC] Amperage alarm !')
     while True:
@@ -139,7 +140,7 @@ def beep_sound():
             pass
         else:  # 警告閾値超えでBEEP ONなら
             if (amperage >= config['WARNING_AMPERAGE']) and (beep_on is True):
-                speaker.tone(freq=220, duration=200)
+                # speaker.playTone(220, 2, volume=8) << 警告音鳴動
                 utime.sleep(2)
         utime.sleep(0.1)
 
@@ -195,7 +196,8 @@ def auto_rotation(direction):
 
 # 【exec】　画面初期化
 def init_screen():
-    lcd.setBrightness(0)  # バックライトOFF
+    screen = M5Screen()
+    screen.set_screen_brightness(0)  # バックライトOFF
     lcd.setColor(bcolor=BG_COLOR)
     lcd.clear()
     lcd.rect(0, 224, 320, 240, 0x303030, 0x303030)
@@ -204,7 +206,7 @@ def init_screen():
     draw_cumul()
     if sum(hist_flag) == data_period + 1:
         lcd.circle(310, 232, 8, 0x1f77b4, 0x1f77b4)
-    lcd.setBrightness(config['LCD_BRIGHTNESS'])  # バックライト輝度設定
+    screen.set_screen_brightness(config['LCD_BRIGHTNESS_C2'])  # バックライト輝度設定
 
 
 # 【draw】　BEEPアイコン描画
@@ -309,30 +311,29 @@ def draw_w_a():
     if draw_page[page] == draw_main:
         lcd.rect(0, 0, 320, 125, BG_COLOR, BG_COLOR)
         # 瞬間電力値表示
-        lcd.font(lcd.FONT_7seg, dist=30, width=6)
-        lcd.print(str(wattage) + ' ', lcd.RIGHT, 10, fc)
-        # W表示
+        lcd.font(lcd.FONT_DejaVu72)
+        lcd.print(str(wattage), 190 - lcd.textWidth(str(wattage)), 35, fc)
         lcd.font(lcd.FONT_DejaVu40)
-        lcd.print('W', 274, 78, uncolor)
+        lcd.print('W', 190, 65, uncolor)
         # 瞬間電流表示
+        lcd.font(lcd.FONT_DejaVu40)
+        lcd.print(str(int(amperage)), 292 - lcd.textWidth(str(int(amperage))), 59, fc)
         lcd.font(lcd.FONT_DejaVu24)
-        lcd.print(str(int(amperage)), 300 - lcd.textWidth(str(int(amperage))), 54, fc)
-        lcd.font(lcd.FONT_Ubuntu)
-        lcd.print('A', 303, 59, uncolor)
+        lcd.print('A', 293, 78, uncolor)
 
     # 電力量グラフ (当日と前日) 表示モード時
     elif draw_page[page] == draw_graph_1:
         lcd.rect(70, 0, 250, 63, BG_COLOR, BG_COLOR)
         # 瞬間電力値表示
-        lcd.font(lcd.FONT_7seg, dist=14, width=3)
-        lcd.print(str(wattage) + '   ', lcd.RIGHT, 7, fc)
+        lcd.font(lcd.FONT_DejaVu56)
+        lcd.print(str(wattage) + '     ', lcd.RIGHT, 13, fc)
         # W表示
         lcd.font(lcd.FONT_DejaVu24)
-        lcd.print('W', 240, 32, uncolor)
+        lcd.print('W', 240, 36, uncolor)
         # 瞬間電流表示
         lcd.font(lcd.FONT_DejaVu24)
         lcd.print(str(int(amperage)), 300 - lcd.textWidth(str(int(amperage))), 37, fc)
-        lcd.font(lcd.FONT_Ubuntu)
+        lcd.font(lcd.FONT_DejaVu18)
         lcd.print('A', 303, 42, uncolor)
 
 
@@ -355,7 +356,7 @@ def draw_graph_1():
     for i in range(0, 49, 12):
         lcd.line(6 * i + 15, 65, 6 * i + 15, 206, 0x303030)
 
-    lcd.font(lcd.FONT_Ubuntu)
+    lcd.font(lcd.FONT_Default)
     for i in range(0, 5):
         lcd.print('{:02}'.format(i * 6), i * 72 + 6, 208, tx_color1)
     print_b('{:.1f} kWh'.format(DAY_GRAPH_SCALE), 0, 48, tx_color1, 2)
@@ -519,19 +520,19 @@ def draw_graph(draw_period, bar_width, bar_pitch, gr_start, av_start):
         lcd.triangle(x, 219, x + 4, 223, x - 4, 223, color_edge, color_edge)
 
         # 文字描画セクション
-        lcd.font(lcd.FONT_Ubuntu)
+        lcd.font(lcd.FONT_Default)
 
         max_txt = str(GRAPH_SCALE) + ' kWh >'
         t_sub_t = '{:.1f} kWh'.format(today_sub_t)
-        print_b(max_txt, 318 - lcd.textWidth(max_txt), 0 + 3, tx_color2, 2)
-        print_b(' Today :', 5, 0 + 3, tx_color2, 2)
-        print_b(t_sub_t, 145 - lcd.textWidth(t_sub_t), 0 + 3, tx_color2, 2)
+        print_b(max_txt, 318 - lcd.textWidth(max_txt), 0 + 5, tx_color2, 2)
+        print_b(' Today :', 5, 0 + 5, tx_color2, 2)
+        print_b(t_sub_t, 145 - lcd.textWidth(t_sub_t), 0 + 5, tx_color2, 2)
 
         a_sub_t = '{:.1f}'.format(avg_sub_t)
         a_cumul = '{:.1f}'.format(avg_cumul)
-        print_b(' AVG :', 19, 200 + 3, tx_color2, 2)
-        print_b(a_sub_t, 107 - lcd.textWidth(a_sub_t), 200 + 3, tx_color2, 2)
-        print_b(a_cumul, 153 - lcd.textWidth(a_cumul), 200 + 3, tx_color2, 2)
+        print_b(' AVG :', 19, 200 + 5, tx_color2, 2)
+        print_b(a_sub_t, 107 - lcd.textWidth(a_sub_t), 200 + 5, tx_color2, 2)
+        print_b(a_cumul, 153 - lcd.textWidth(a_cumul), 200 + 5, tx_color2, 2)
 
         # 7日間グラフの場合は日毎データ値を表示
         if draw_period == 7:
@@ -539,8 +540,8 @@ def draw_graph(draw_period, bar_width, bar_pitch, gr_start, av_start):
                 d_date = hist_date[n] + ' :'
                 d_sub_t = '{:.1f}'.format(daily_sub_t[n])
                 d_cumul = '{:.1f}'.format(daily_cumul[n])
-                y = (n * 25) + 3
-                lcd.print(d_date, 68 - lcd.textWidth(d_date), y, color=tx_color1)
+                y = (n * 25) + 5
+                lcd.print(d_date, 64 - lcd.textWidth(d_date), y, color=tx_color1)
                 lcd.print(d_sub_t, 107 - lcd.textWidth(d_sub_t), y, color=tx_color1)
                 lcd.print(d_cumul, 153 - lcd.textWidth(d_cumul), y, color=tx_color1)
 
@@ -548,8 +549,8 @@ def draw_graph(draw_period, bar_width, bar_pitch, gr_start, av_start):
         if draw_period == 30:
             for n in range(7, avg_period + 1, 7):
                 d_date = hist_date[n] + ' :'
-                y = (n // 7) * 44 + 6
-                lcd.print(d_date, 68 - lcd.textWidth(d_date), y, color=tx_color1)
+                y = (n // 7) * 44 + 8
+                lcd.print(d_date, 64 - lcd.textWidth(d_date), y, color=tx_color1)
 
     else:
         lcd.rect(0, 0, 320, 224, BG_COLOR, BG_COLOR)
@@ -587,10 +588,17 @@ def draw_table(calc_period, caption, col_caption):
 
     # 描画エリアのクリアとタイトル表示
     lcd.rect(0, 0, 320, 224, BG_COLOR, BG_COLOR)
-    lcd.font(lcd.FONT_Ubuntu)
-    print_b('AM: Tdy:{:6}Diff'.format(caption + ':'), 0, 0, col_caption, 2)
-    print_b('PM: Tdy:{:6}Diff'.format(caption + ':'), 166, 0, col_caption, 2)
-    lcd.print('|' + '\n', 155, 0, color=tx_color1)
+    lcd.font(lcd.FONT_Default)
+
+    print_b('AM:', 0, 0, col_caption, 2)
+    print_b('Tdy:', 68 - lcd.textWidth('Tdy:'), 0, col_caption, 2)
+    print_b(caption + ':', 97 - int(lcd.textWidth(caption + ':')/2), 0, col_caption, 2)
+    print_b('Diff', 149 - lcd.textWidth('Diff'), 0, col_caption, 2)
+    print_b('PM:', 166, 0, col_caption, 2)
+    print_b('Tdy:', 234 - lcd.textWidth('Tdy:'), 0, col_caption, 2)
+    print_b(caption + ':', 263 - int(lcd.textWidth(caption + ':')/2), 0, col_caption, 2)
+    print_b('Diff', 315 - lcd.textWidth('Diff'), 0, col_caption, 2)
+    lcd.print('|', 155, 0, color=tx_color1)
 
     # データ集計セクション
     for n in range(0, 12):  # 0〜11
@@ -647,16 +655,24 @@ def draw_table(calc_period, caption, col_caption):
             color_diff_PM = 0x00d000  # 緑
 
         # 描画セクション
-        lcd.print(' {:02}: '.format(n), color=0xd0d000)
-        lcd.print(' {:3.1f}:  {:3.1f}: '.format(hour_power[0][n],
-                  avg_hour_power[n]), color=tx_color1)
-        lcd.print(diff_AM_str, 149 - lcd.textWidth(diff_AM_str), (n + 1) * 16, color=color_diff_AM)
-        lcd.print(' |  ', color=tx_color1)
-        lcd.print('{:02}: '.format(n + 12), color=0xd0d000)
-        lcd.print(' {:3.1f}:  {:3.1f}: '.format(hour_power[0][n + 12],
-                  avg_hour_power[n + 12]), color=tx_color1)
-        lcd.print(diff_PM_str, 315 - lcd.textWidth(diff_PM_str), (n + 1) * 16, color=color_diff_PM)
-
+        AM_str = '{:02}:'.format(n)
+        PM_str = '{:02}:'.format(n+12)
+        power_AM_str = '{:3.1f}:'.format(hour_power[0][n])
+        power_PM_str = '{:3.1f}:'.format(hour_power[0][n+12])
+        avg_AM_str = '{:3.1f}:'.format(avg_hour_power[n])
+        avg_PM_str = '{:3.1f}:'.format(avg_hour_power[n+12])
+        
+        y = (n + 1) * 16
+        lcd.print(AM_str, 2, y, color=0xd0d000)
+        lcd.print(power_AM_str, 68 - lcd.textWidth(power_AM_str), y, color=tx_color1)
+        lcd.print(avg_AM_str, 110 - lcd.textWidth(avg_AM_str), y, color=tx_color1)
+        lcd.print(diff_AM_str, 149 - lcd.textWidth(diff_AM_str), y, color=color_diff_AM)
+        lcd.print('|', 155, y, color=tx_color1)
+        lcd.print(PM_str, 168, y, color=0xd0d000)
+        lcd.print(power_PM_str, 234 - lcd.textWidth(power_PM_str), y, color=tx_color1)
+        lcd.print(avg_PM_str, 276 - lcd.textWidth(avg_PM_str), y, color=tx_color1)
+        lcd.print(diff_PM_str, 315 - lcd.textWidth(diff_PM_str), y, color=color_diff_PM)
+        
     # 当日(現時刻まで)および期間平均の24時間積算電力量と、比(%)を最下段に表示
     if created_time != '**:**':
         if TIME_TB.index(created_time) == 0:
@@ -690,10 +706,10 @@ def draw_table(calc_period, caption, col_caption):
         lcd.print(caption_t, 192 - lcd.textWidth(caption_t), 211, color=col_caption)
         lcd.print('Ratio:', 233, 211, color=col_caption)
 
-        lcd.font(lcd.FONT_Ubuntu)
-        lcd.print(hist_data_of_Today, 67, 208, color=0xffffff)
-        lcd.print(hist_data_of_avg, 193, 208, color=0xffffff)
-        lcd.print(hist_data_Ratio, 274, 208, color=color_ratio)
+        lcd.font(lcd.FONT_Default)
+        lcd.print(hist_data_of_Today, 69, 211, color=0xffffff)
+        lcd.print(hist_data_of_avg, 195, 211, color=0xffffff)
+        lcd.print(hist_data_Ratio, 276, 211, color=color_ratio)
 
     del hour_power, avg_hour_power
     gc.collect()
@@ -736,7 +752,7 @@ def get_hist_data():
 
     init_screen()
     indicator_timer.deinit()
-    indicator_timer.init(period=200, mode=indicator_timer.PERIODIC, callback=draw_indicator)
+    indicator_timer.init(period=100, mode=indicator_timer.PERIODIC, callback=draw_indicator)
     beep()
 
 
@@ -755,7 +771,9 @@ if __name__ == '__main__':
         # Start checking the WiFi connection
         checkWiFi_timer.init(period=60 * 1000, mode=checkWiFi_timer.PERIODIC, callback=checkWiFi)
 
-        lcd.clear(0)
+        utime.sleep(0.1)
+        lcd.clear(0x000000)
+        utime.sleep(0.1)
         lcd.font(lcd.FONT_DejaVu18)
         lcd.println('Welcome to SMM3 !', 0, 0, color=0xFF0000)
 
@@ -836,7 +854,7 @@ if __name__ == '__main__':
         # 画面初期化
         init_screen()
         indicator_timer.deinit()
-        indicator_timer.init(period=200, mode=indicator_timer.PERIODIC, callback=draw_indicator)
+        indicator_timer.init(period=100, mode=indicator_timer.PERIODIC, callback=draw_indicator)
 
 
         # メインループ

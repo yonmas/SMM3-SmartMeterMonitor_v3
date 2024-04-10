@@ -1,3 +1,5 @@
+from m5stack_ui import *  ### << ### 
+
 from m5stack import lcd, speaker, btnA
 import uos
 import ujson
@@ -25,8 +27,7 @@ logger = logging.getLogger('CNFG')
 
 # 【exec】　動作音beep
 def beep():
-    speaker.setVolume(0.1)
-    speaker.tone(330, 150)
+    speaker.playTone(220, 0.3, volume=8)
 
 
 # 【exec】　処理ステータスの表示
