@@ -27,12 +27,12 @@ config = {
     'COLLECT_CALENDAR': [''] * 13,
     'COLLECT_DATE': 15,
     'CHARGE_FUNC': 'tepco',
-    'BASE': 1180.96,
-    'RATE1': 30.0,
-    'RATE2': 36.6,
-    'RATE3': 40.69,
-    'SAIENE': 0,
+    'BASE': 1247.00,
+    'RATE1': 29.80,
+    'RATE2': 36.40,
+    'RATE3': 40.49,
     'NENCHO': 0,
+    'SAIENE': 0,
     'TIMEOUT_MAIN': 30,
     'LOG_LEVEL': 'INFO',  # 'CRITICAL', 'ERROR', 'WARNING', 'INFO', 'DEBUG'
 }
@@ -52,8 +52,8 @@ ampere_limit_over = False
 step = 0
 
 # タイマー
-indicator_timer = Timer(-1)
-checkWiFi_timer = Timer(-1)
+checkWiFi_timer = Timer(0)
+indicator_timer = Timer(3)
 
 # 履歴データを取得する期間（日）
 data_period = 35            # 何日前までのデータを参照するか
@@ -108,6 +108,14 @@ TIME_TB = [
 ]
 
 
+# 【calc】　day[yyyy-mm-dd] から 曜日番号を返す　（0:月, 1:火, 2:水, 3:木, 4:金, 5:土, 6:日）
+def day_from_date(date_str):
+    [yyyy, mm, dd] = [int(i) for i in date_str.split('-')]
+    the_date = (yyyy, mm, dd, 1, 0, 0, 0, 0, 0)
+    day = int((utime.mktime(the_date) // 86400) - 10957) % 7
+    return day
+
+
 # 【calc】　today[yyyy-mm-dd] から days日前の日付[MM/DD]を返す
 def date_of_days_ago(today, days):
     year = int(today[:4])
@@ -136,6 +144,8 @@ def date_of_days_ago(today, days):
 def flip_lcd_orientation():
     global orient
 
+    logger.info('[EXEC] Flip screen.')
+
     if orient == lcd.LANDSCAPE:
         orient = lcd.LANDSCAPE_FLIP
     else:
@@ -148,6 +158,7 @@ def flip_lcd_orientation():
 
 # 【exec】　WiFi接続チェック
 def checkWiFi(arg):
+    logger.info('[EXEC] Checking Wi-Fi.')
     if not wifiCfg.is_connected():
         logger.warning('[ERR.] Reconnect to WiFi')
         if not wifiCfg.reconnect():
@@ -314,8 +325,8 @@ def set_instance(config):
         config['RATE1'],   # 1段料金
         config['RATE2'],   # 2段料金
         config['RATE3'],   # 3段料金
+        config['NENCHO'],  # 燃料費調整単価
         config['SAIENE'],  # 再エネ発電賦課金単価
-        config['NENCHO']   # 燃料費調整単価
     )
 
     try:
@@ -337,6 +348,7 @@ def set_instance(config):
 # 【config】　設定用GSSから設定をリロード
 def reload_config(config):
     global TIMEOUT_MAIN, WARNING_AMPERAGE, CONTRACT_AMPERAGE
+    global collect, monthly_e_energy, charge
     # global inst_time, cumul_time, cumul_flag
 
     lcd.clear()
@@ -345,7 +357,8 @@ def reload_config(config):
     config = cnfg.update_config_from_gss(api_config, config)
     cnfg.save_config(config)
     config, TIMEOUT_MAIN, WARNING_AMPERAGE, CONTRACT_AMPERAGE = cnfg.set_config(config)
-    set_instance(config)
+    set_instance(config)  # インスタンスを再定義
+    collect, _, _, monthly_e_energy, charge, _ = send_cumul()  # 料金を再計算
     draw_main()
     beep()
 
@@ -381,17 +394,34 @@ def send_cumul():
     _e_energy = e_energy
     _monthly_e_energy = monthly_e_energy
     _charge = charge
+    
+    _hourly_power = [[0 for i in range(24)] for j in range(data_period + 1)]
 
     try:
         # 取得
         _created, _e_energy = bp35a1.get_cumul_e_energy()
         _collect, _days_ago = bp35a1.get_collect_date()
-        if hist_flag[_days_ago] is True:
-            _e_energy_0 = hist_data[_days_ago][0] * UNIT
-        else:
-            _e_energy_0 = bp35a1.get_collected_e_energy()
-        _monthly_e_energy = _e_energy - _e_energy_0
-        _charge = calc_charge_func(config['CONTRACT_AMPERAGE'], _monthly_e_energy)
+        
+        _created_date = _created[:10]
+        _created_day = day_from_date(_created_date)  # 曜日番号の取得
+        
+        if hist_flag[_days_ago] is True:  # 料金計算期間のデータを取得済みなら〜
+            for i in range(0, _days_ago + 1):  # 1時間ごとの使用電力量リストを作成（料金計算用）
+                for j in range(0, 24):
+                    if hist_data[i][j * 2 + 2] != 0:
+                        _hourly_power[i][j] = (hist_data[i][j * 2 + 2] - hist_data[i][j * 2])
+                    elif hist_data[i][j * 2 + 1] != 0:
+                        _hourly_power[i][j] = (hist_data[i][j * 2 + 1] - hist_data[i][j * 2])
+
+            _monthly_e_energy = int(sum(sum(row) for row in _hourly_power) * UNIT)
+            _charge = calc_charge_func(config['CONTRACT_AMPERAGE'], _hourly_power, _created_day, UNIT)
+
+        # if hist_flag[_days_ago] is True:
+        #     _e_energy_0 = hist_data[_days_ago][0] * UNIT
+        # else:
+        #     _e_energy_0 = bp35a1.get_collected_e_energy()
+        # _monthly_e_energy = _e_energy - _e_energy_0
+        # _charge = calc_charge_func(config['CONTRACT_AMPERAGE'], _monthly_e_energy)
 
         # 子機送信
         CUML = str('M:CUML' + str(_collect) + '/' + str(_created) + '/' + str(_e_energy) + '/'
@@ -464,6 +494,8 @@ def get_hist_data():
     
     logger.info('[INIT] Get Historical DATA')
 
+    del hist_data
+
     hist_day = 0  # データ取得日
     hist_flag = [False] * (data_period + 1)  # 履歴データがあるかどうか
     hist_created = [''] * (data_period + 1)  # 履歴データの生成日
@@ -483,6 +515,7 @@ def get_hist_data():
     utime.sleep(0.1)
 
     beep()
+
 
 # 【exec】 取得済みの積算電力-履歴データを子機に続けて送信
 def send_all_hist_data(id):
@@ -785,6 +818,7 @@ if __name__ == '__main__':
                             logger.info('[HIST] Data acquisition completed. time = %d', t)
                             indicator_timer.deinit()
                             lcd.circle(234, 7, 3, 0x000000, 0x000000)
+                            collect, created, e_energy, monthly_e_energy, charge, _ = send_cumul()
 
                         retries = 0
 
