@@ -39,8 +39,8 @@ auto_rotation_sw = False  # オートローテーションのスイッチ
 
 # タイマー
 rotation_timer = Timer(0)
-indicator_timer = Timer(2)
-checkWiFi_timer = Timer(3)
+# checkWiFi_timer = Timer(2)  # タイマーリソース不足のため停止
+indicator_timer = Timer(3)
 
 # 履歴データを取得する期間（日）
 data_period = 30
@@ -270,7 +270,7 @@ def draw_main():
     if monthly_e_energy == 0:
         monthly_e_energy_d = '-'
     else:
-        monthly_e_energy_d = str(int(monthly_e_energy))
+        monthly_e_energy_d = str(monthly_e_energy)
     lcd.font(lcd.FONT_DejaVu40)
     len_txt = lcd.textWidth(monthly_e_energy_d)
     lcd.print(monthly_e_energy_d, x + w - len_txt - 20, y + 5, color2)
@@ -281,7 +281,7 @@ def draw_main():
     if charge == 0:
         charge_d = '-'
     else:
-        charge_d = str(int(charge))
+        charge_d = str(charge)
     lcd.font(lcd.FONT_DejaVu40)
     len_txt = lcd.textWidth(charge_d)
     lcd.print(charge_d, x + w - len_txt - 20, y + 5, color2)
@@ -768,8 +768,8 @@ if __name__ == '__main__':
         wifiCfg.wlan_ap.active(True)
         espnow.init(0)
 
-        # Start checking the WiFi connection
-        checkWiFi_timer.init(period=60 * 1000, mode=checkWiFi_timer.PERIODIC, callback=checkWiFi)
+        # Start checking the WiFi connection  # タイマーリソース不足のため停止
+        # checkWiFi_timer.init(period=60 * 1000, mode=checkWiFi_timer.PERIODIC, callback=checkWiFi)
 
         utime.sleep(0.1)
         lcd.clear(0x000000)
@@ -976,8 +976,8 @@ if __name__ == '__main__':
                         created_date = created.strip().split(' ')[0]  # 定時積算電力取得日
                         created_time = created.strip().split(' ')[1][:5]  # 定時積算電力取得時刻
                         e_energy = round(float(cumul_data[2]), 1)  # 積算電力量
-                        monthly_e_energy = round(float(cumul_data[3]), 1)  # 今月の電力量(created_dateまで)
-                        charge = cumul_data[4]  # 今月の電気料金(created_dateまで)
+                        monthly_e_energy = int(float(cumul_data[3]))  # 今月の電力量(created_dateまで)
+                        charge = int(cumul_data[4])  # 今月の電気料金(created_dateまで)
 
                         logger.info('[CUML] <- %s', cumul_data)
 
