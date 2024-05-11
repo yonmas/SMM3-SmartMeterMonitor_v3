@@ -718,7 +718,7 @@ class BP35A1:
     def close(self):
         self.skTerm()
 
-
+'''
 # 動作確認用ルーチン
 if __name__ == '__main__':
     id = 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'  # Bルート ID
@@ -744,3 +744,4 @@ if __name__ == '__main__':
             logger.error(e)
 
     bp35a1.close()
+'''

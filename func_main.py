@@ -152,7 +152,8 @@ def update_config_from_gss(api_config, config):
             data_google = response.json()['values']  # 'values'の項目をリスト型として取得
             status('Config_GSS loaded.', uncolor)
 
-        except Exception:
+        except Exception as e:
+            logger.error('[INIT] %s', e)
             status('Config_GSS failure !', 0xff0000)
             utime.sleep(5)
             return

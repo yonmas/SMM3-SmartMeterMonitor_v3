@@ -327,13 +327,14 @@ def set_instance(config):
         config['RATE3'],   # 3段料金
         config['NENCHO'],  # 燃料費調整単価
         config['SAIENE'],  # 再エネ発電賦課金単価
+        0                  # 当日を含む集計
     )
 
     try:
         calc_charge_func = getattr(calc_instance, config['CHARGE_FUNC'])
     except Exception as e:
         status('No calc_charge_method !', 0xff0000)
-        logger.error(e)
+        logger.error('[INIT] %s', e)
         beep()
         utime.sleep(30)
         sys.exit()
@@ -394,17 +395,15 @@ def send_cumul():
     _e_energy = e_energy
     _monthly_e_energy = monthly_e_energy
     _charge = charge
-    
-    _hourly_power = [[0 for i in range(24)] for j in range(data_period + 1)]
 
     try:
         # 取得
         _created, _e_energy = bp35a1.get_cumul_e_energy()
-        _collect, _days_ago = bp35a1.get_collect_date()
-        
         _created_date = _created[:10]
         _created_day = day_from_date(_created_date)  # 曜日番号の取得
-        
+        _collect, _days_ago = bp35a1.get_collect_date()
+
+        _hourly_power = [[0 for i in range(24)] for j in range(_days_ago + 1)]
         if hist_flag[_days_ago] is True:  # 料金計算期間のデータを取得済みなら〜
             for i in range(0, _days_ago + 1):  # 1時間ごとの使用電力量リストを作成（料金計算用）
                 for j in range(0, 24):
@@ -413,15 +412,12 @@ def send_cumul():
                     elif hist_data[i][j * 2 + 1] != 0:
                         _hourly_power[i][j] = (hist_data[i][j * 2 + 1] - hist_data[i][j * 2])
 
-            _monthly_e_energy = int(sum(sum(row) for row in _hourly_power) * UNIT)
-            _charge = calc_charge_func(config['CONTRACT_AMPERAGE'], _hourly_power, _created_day, UNIT)
+            _charge, _monthly_e_energy = calc_charge_func(config['CONTRACT_AMPERAGE'],
+                                                          _hourly_power, _created_day, UNIT)
 
-        # if hist_flag[_days_ago] is True:
-        #     _e_energy_0 = hist_data[_days_ago][0] * UNIT
-        # else:
-        #     _e_energy_0 = bp35a1.get_collected_e_energy()
-        # _monthly_e_energy = _e_energy - _e_energy_0
-        # _charge = calc_charge_func(config['CONTRACT_AMPERAGE'], _monthly_e_energy)
+            logger.debug('[CUML] -> hourly_power = %s', _hourly_power)
+            del _hourly_power
+            gc.collect()
 
         # 子機送信
         CUML = str('M:CUML' + str(_collect) + '/' + str(_created) + '/' + str(_e_energy) + '/'
@@ -818,7 +814,8 @@ if __name__ == '__main__':
                             logger.info('[HIST] Data acquisition completed. time = %d', t)
                             indicator_timer.deinit()
                             lcd.circle(234, 7, 3, 0x000000, 0x000000)
-                            collect, created, e_energy, monthly_e_energy, charge, _ = send_cumul()
+                            cumul_flag = False
+                            cumul_time = utime.time() - 1200
 
                         retries = 0
 
