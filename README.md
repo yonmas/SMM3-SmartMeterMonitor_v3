@@ -103,16 +103,19 @@ Ambient でアカウントを作成し、チャネルを作成。チャネルID�
 
 ## 4. ファイル構成
 
+スマートメーターの履歴保持期間によって通常バージョンか、liteバージョンをお選びください。まずは通常バージョンを試して、30日間グラフが途中までしか描かれない場合は履歴保持期間が短いメーターなので、liteバージョンを使ってください。
 ```text
 ■■ 親機（main)：M5StickC Plus + Wi-SUN HAT(with BP35A1 module) ■■
 
 /apps/
   +- smm3_main.py (親機メインプログラム)
+  or
+  +- smm3-lite_main.py (親機メインプログラム liteバージョン)
 
 /（ルート）
   +- bp35a1.py (BP35A1クラス)
   +- func_main.py (外部モジュール)
-  +- calc_charge.py (電気料金計算モジュール)
+  +- calc_charge.py (電気料金計算モジュール ※必要な計算モジュールをリネーム)
   +- logging.py (別途準備)
   +- ambient.py (オプション：別途準備)
   ===== 以下のファイルはGSSによる設定を行わない場合のみ使用 =====
@@ -126,8 +129,11 @@ Ambient でアカウントを作成し、チャネルを作成。チャネルID�
 ※ M5Stack Basic のファームは、V1.10.2 以降としてください。
 
 /apps/
-  +- smm3_sub.py (子機メインプログラム　※Basic用)
-  +- smm3_sub_core2.py (子機メインプログラム　※Core2用)
+  +- smm3_sub.py (子機メインプログラム ※Basic用)
+  +- smm3_sub_core2.py (子機メインプログラム ※Core2用)
+  or
+  +- smm3-lite_sub.py (子機メインプログラム　liteバージョン ※Basic用)
+  +- smm3-lite_sub_core2.py (子機メインプログラム　liteバージョン ※Core2用)
 
 /（ルート）
   +- func_sub.py (外部モジュール　※Basic用)
