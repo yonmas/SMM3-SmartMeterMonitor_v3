@@ -156,7 +156,7 @@ def update_config_from_gss(api_config, config):
             logger.error('[INIT] %s', e)
             status('Config_GSS failure !', 0xff0000)
             utime.sleep(5)
-            return
+            return config  # GSS失敗時はファイル/既定のconfigにフォールバック（Noneを返すと呼出側でクラッシュ＆config破壊）
 
         # リストの要素が数字の場合、int,floatに変換
         for item in data_google:
