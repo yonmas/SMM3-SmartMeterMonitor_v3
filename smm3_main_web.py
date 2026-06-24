@@ -121,6 +121,24 @@ TIME_TB = [
 ]
 
 
+# 【STEP0】 起動時/履歴取得後の最大連続ブロックを二分探索で実測（gc.mem_free()の総量は断片化を見せないため）
+def probe_largest_block():
+    gc.collect()
+    total = gc.mem_free()
+    lo, hi, best = 0, total, 0
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        try:
+            b = bytearray(mid)
+            del b
+            best = mid
+            lo = mid + 1
+        except MemoryError:
+            hi = mid - 1
+    gc.collect()
+    return total, best  # 整数2値だけ返す（文字列化は呼び出し側でログ出力時に行う）
+
+
 # 【calc】　day[yyyy-mm-dd] から 曜日番号を返す　（0:月, 1:火, 2:水, 3:木, 4:金, 5:土, 6:日）
 def day_from_date(date_str):
     [yyyy, mm, dd] = [int(i) for i in date_str.split('-')]
@@ -806,7 +824,8 @@ if __name__ == '__main__':
 
         retries = 0  # リトライカウンターリセット
 
-        logger.info('[WEB_] mem_free at boot (before main loop) = %d', gc.mem_free())  # [STEP0]
+        _total, _largest = probe_largest_block()
+        logger.info('[WEB_] mem at boot (before main loop): total=%d largest=%d', _total, _largest)  # [STEP0][A]
 
         # メインループ
         while retries < max_retries:
@@ -967,7 +986,8 @@ if __name__ == '__main__':
                             beep()
                             t =utime.time() - init_time
                             logger.info('[HIST] Data acquisition completed. time = %d', t)
-                            logger.info('[WEB_] mem_free after history acquisition = %d', gc.mem_free())  # [STEP0]
+                            _total, _largest = probe_largest_block()
+                            logger.info('[WEB_] mem after history acquisition: total=%d largest=%d', _total, _largest)  # [STEP0][B]
                             indicator_timer.deinit()
                             lcd.circle(234, 7, 3, 0x000000, 0x000000)
                             cumul_flag = False
