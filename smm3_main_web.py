@@ -675,6 +675,37 @@ def send_web_hist_retry_one():
         hist_retry_queue.append((d, half))
 
 
+# 【exec】　積算電力-履歴データ取得
+def get_hist_data():
+    global hist_day, hist_flag, hist_created, hist_date, hist_data, day_shift, cumul_flag
+    global hist_time, cumul_time, web_oom_count
+
+    # H1.5:logger.info('[INIT] Get Historical DATA')
+    web_oom_count = 0  # ⓐ再取得開始時にリセット（取得中は誤発火させない。hist_flag[data_period]もFalseに戻る）
+
+    del hist_data
+
+    hist_day = 0  # データ取得日
+    hist_flag = [False] * (data_period + 1)  # 履歴データがあるかどうか
+    hist_created = [''] * (data_period + 1)  # 履歴データの生成日
+    hist_date = [''] * (data_period + 1)  # 履歴データの日にち
+    hist_data = [[0 for i in range(49)] for j in range(data_period + 1)]
+    hist_time = [utime.time() - 1200] * (data_period + 1)  # HIST タイマー
+    day_shift = 0  # 0:00〜0:30 の間はシフト（検討）
+
+    cumul_flag = False
+    cumul_time = utime.time() - 1200  # CUML タイマー
+
+    indicator_timer.deinit()
+    indicator_timer.init(period=200, mode=indicator_timer.PERIODIC, callback=draw_indicator)
+
+    # 親機起動を通知
+    espnow.broadcast(data='M:BOOT')
+    utime.sleep(0.1)
+
+    beep()
+
+
 if __name__ == '__main__':
 
     try:
