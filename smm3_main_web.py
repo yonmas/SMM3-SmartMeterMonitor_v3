@@ -675,81 +675,6 @@ def send_web_hist_retry_one():
         hist_retry_queue.append((d, half))
 
 
-# 【exec】　積算電力-履歴データ取得
-def get_hist_data():
-    global hist_day, hist_flag, hist_created, hist_date, hist_data, day_shift, cumul_flag
-    global hist_time, cumul_time, web_oom_count
-
-    # H1.5:logger.info('[INIT] Get Historical DATA')
-    web_oom_count = 0  # ⓐ再取得開始時にリセット（取得中は誤発火させない。hist_flag[data_period]もFalseに戻る）
-
-    del hist_data
-
-    hist_day = 0  # データ取得日
-    hist_flag = [False] * (data_period + 1)  # 履歴データがあるかどうか
-    hist_created = [''] * (data_period + 1)  # 履歴データの生成日
-    hist_date = [''] * (data_period + 1)  # 履歴データの日にち
-    hist_data = [[0 for i in range(49)] for j in range(data_period + 1)]
-    hist_time = [utime.time() - 1200] * (data_period + 1)  # HIST タイマー
-    day_shift = 0  # 0:00〜0:30 の間はシフト（検討）
-
-    cumul_flag = False
-    cumul_time = utime.time() - 1200  # CUML タイマー
-
-    indicator_timer.deinit()
-    indicator_timer.init(period=200, mode=indicator_timer.PERIODIC, callback=draw_indicator)
-
-    # 親機起動を通知
-    espnow.broadcast(data='M:BOOT')
-    utime.sleep(0.1)
-
-    beep()
-
-
-# 【exec】 取得済みの積算電力-履歴データを子機に続けて送信
-def send_all_hist_data(id):
-    # H1.5:logger.info('[INIT] Continuously send all hist. data.')
-    _hist_time = [utime.time() - 1200] * (data_period + 1)  # HIST タイマー
-    _time = utime.time()
-    recv = True  # データ受信フラグ
-    while utime.time() - _time < 30:  # 子機からのリクエストが30秒以上途絶えたら終了
-
-        # 指定秒数以内の重複リクエストはスキップ
-        if recv and hist_flag[id] is True and utime.time() - _hist_time[id] > 30:
-            _send_data = ''
-            for k in range(0, 49):
-                _send_data += '{:08X}'.format(hist_data[id][k])
-            send_data = (bytes('M:ID{:02}{}{:5}'
-                               .format(id, hist_created[id], hist_date[id]), 'UTF-8')
-                         + binascii.unhexlify(_send_data + '00'))
-            espnow.broadcast(data=send_data)
-            _hist_time[id] = utime.time()
-            _time = utime.time()
-
-            # H1.5:logger.info('[HIST] -> [(%d) %s [%s %.1f - %.1f : %.1f]]',
-                        # H1.5:id, hist_created[id],
-                        # H1.5:hist_date[id],
-                        # H1.5:hist_data[id][0] * UNIT,
-                        # H1.5:hist_data[id][47] * UNIT,
-                        # H1.5:hist_data[id][48] * UNIT)
-            # H1.5:logger.debug('[HIST] -> Raw = %s', hist_data[id])
-            # logger.debug('[HIST] -> [%d, %s]', id, binascii.hexlify(send_data).decode('utf-8'))
-            if id == 30:
-                return id, _hist_time
-
-        recv = False
-        while not recv and utime.time() - _time < 30:  # 子機からのリクエストが30秒以上途絶えたら終了
-            d = espnow.recv_data()
-            if (len(d[2]) > 0):
-                key = str(d[2].decode().strip())
-                # H1.5:logger.info('[RECV] <- Key = [%s]', key)
-                if key.startswith('REQ'):
-                    id = int(key[3:5])
-                    recv = True  # データ受信フラグ
-
-    return id, _hist_time
-
-
 if __name__ == '__main__':
 
     try:
@@ -940,10 +865,6 @@ if __name__ == '__main__':
                     if id == 0:
                         cumul_flag = False
                         cumul_time = utime.time() - 1200
-
-                        # 取得済みの履歴データを一気に子機に送信する場合。送信中は瞬時計測値等は更新しない
-                        # if hist_flag[0] is True:
-                        #     id, hist_time = send_all_hist_data(id)
 
                     # 指定秒数以内の重複リクエストはスキップ
                     if hist_flag[id] is True and utime.time() - hist_time[id] > 30:
