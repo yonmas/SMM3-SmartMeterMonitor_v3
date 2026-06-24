@@ -22,7 +22,7 @@ WEB_GAS_URL = ('https://script.google.com/macros/s/'
               + 'AKfycbwqlKfYse4RoTh37ITriH8MgaI_0turu-PoSDzvE6ZgU5t0hUvT1yZQXxKwmgEPxFqV'
               + '/exec')
 WEB_INST_INTERVAL = 30  # 瞬時電力をGASへ送る間隔（秒）。ESP-NOW(10秒)より粗くしてGAS無料枠を節約
-WEB_HIST_SEND_ENABLED = False  # 履歴データのGAS送信。メモリ実験中はオフ（cuml/instの瞬時送信は対象外）
+WEB_HIST_SEND_ENABLED = True  # 履歴データのGAS送信。H2検証で送信有りに復帰（cuml/instの瞬時送信は対象外）
 
 # 定数初期値
 config = {
