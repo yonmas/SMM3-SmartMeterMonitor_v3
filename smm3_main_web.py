@@ -558,13 +558,13 @@ def send_web_cuml(collect, created, e_energy, monthly_e_energy, charge):
 
 # 【send】 Web ダッシュボード(GAS)へ瞬時電力データ送信：WEB_INST_INTERVAL秒おきに間引き
 # muted: スマートメーターからのデータ途絶中（data_mute）かどうか。本体LCDのグレー表示と同じ意味合い
-def send_web_inst(wattage, muted):
+def send_web_inst(wattage, amperage, muted):
     global web_oom_count
     result = False
     mf = gc.mem_free()  # 送信前の空きヒープ（整数で先取り＝送信を汚染しない）
 
     try:
-        payload = ujson.dumps({'type': 'inst', 'watt': wattage, 'muted': muted})
+        payload = ujson.dumps({'type': 'inst', 'watt': wattage, 'amp': amperage, 'muted': muted})
         response = urequests.post(url=WEB_GAS_URL, data=payload,
                                   headers={'Content-Type': 'application/json'})
         response.close()
@@ -989,7 +989,7 @@ if __name__ == '__main__':
 
             # 【WEB_INST】 Web ダッシュボード(GAS)へ瞬時電力送信：Send every WEB_INST_INTERVAL seconds
             if (utime.time() - web_inst_time) >= WEB_INST_INTERVAL:
-                send_web_inst(wattage, data_mute)
+                send_web_inst(wattage, amperage, data_mute)
                 web_inst_time = utime.time()
 
             # 【WEB_HIST_RETRY】 履歴データ送信に失敗した(日, half)があれば、メインループ1回につき1件だけ再送信
