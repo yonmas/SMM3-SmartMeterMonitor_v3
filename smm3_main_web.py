@@ -1,5 +1,6 @@
 from m5stack import lcd, btnA, btnB
-from machine import Timer, reset
+from machine import Timer, reset, WDT, reset_cause
+import array
 import binascii
 import espnow
 import gc
@@ -7,6 +8,10 @@ import logging
 import math
 import ntptime
 import sys
+import ujson
+import urequests
+import usocket
+import ussl
 import utime
 import wifiCfg
 from bp35a1 import BP35A1
@@ -14,12 +19,30 @@ from calc_charge import CalcCharge
 from func_main import beep, status
 import func_main as cnfg
 
+# Web ダッシュボード (Google Apps Script) 設定
+# GAS の /exec URL は秘匿情報（漏れると宅内電力データの閲覧＋偽データPOSTが可能）なのでコードに
+# 直書きせず、config['WEB_GAS_URL']（config_main.json / 設定用GSS）から起動時に読み込む。
+# 空（未設定）なら GAS への送信はすべてスキップされる（_web_post が no-op）。
+WEB_GAS_URL = ''
+WEB_INST_INTERVAL = 30  # 瞬時電力をGASへ送る間隔（秒）。ESP-NOW(10秒)より粗くしてGAS無料枠を節約
+WEB_HIST_SEND_ENABLED = True  # 履歴データのGAS送信。H2検証で送信有りに復帰（cuml/instの瞬時送信は対象外）
+BLACKBOX_ENABLED = True  # 起動時に reset_cause を GAS へ報告（type:'boot'）。GAS側で累積再起動回数＋
+                         # タイムスタンプ付きログを恒久保存し、再起動頻度を把握する。Falseで報告OFF
+                         # （実行時の動きだけ止まる。RTCは本機で再起動を跨がず不可のためGAS側で記録する）。
+WEB_POST_TIMEOUT = 15  # GAS送信ソケットのtimeout(秒)。settimeoutは各操作(connect/write/read)ごとの制限。
+                       # 危険なのはレスポンスread＝サーバがシート追記して返すまで待つ所。正常は〜5秒だが
+                       # コールドスタート/シート混雑で伸びうるため15秒に余裕を持たせる。ハングは約15秒で
+                       # 例外化(ETIMEDOUT)→呼び出し側try/exceptが拾い再起動せず復帰。切りすぎるなら延ばす。
+WDT_TIMEOUT_MS = 120000  # ハードウォッチドッグ周期(ms)。urequestsがGAS無応答で無限ブロックしてもfeedが途切れて
+                         # 約120秒で自動リセット→復帰。BP35A1の最大待ち(~60s)＋sleep(30)を上回る値で誤リセットを回避。
+
 # 定数初期値
 config = {
     'B_ID': None,
     'B_PASSWORD': None,
     'A_ID': '*',
     'A_KEY': '*',
+    'WEB_GAS_URL': '',   # GASダッシュボードの /exec URL（Ambientの A_ID/A_KEY の後継＝データ送信先）
     'A_INTERVAL': 30,
     'CONTRACT_AMPERAGE': 40,
     'WARNING_AMPERAGE': 30,
@@ -41,7 +64,6 @@ config = {
 logger = None               # Logger object
 logger_name = 'MAIN'        # Logger name
 bp35a1 = None               # BPA35A1 object
-ambient_client = None       # Ambient instance
 ipv6_addr = None
 coefficient = None
 unit = None
@@ -50,6 +72,11 @@ max_retries = 30            # Maximum number of times to retry
 data_mute = False
 ampere_limit_over = False
 step = 0
+hist_retry_queue = []       # Web送信に失敗した(日, half)。メインループ1回につき1件だけ再送信を試みる
+web_oom_count = 0           # ⓐ自己復旧：履歴取得後のweb送信(inst/cuml)の連続MemoryError数（成功で0）
+WEB_OOM_RESET = 6           # ⓐ自己復旧：この回数連続でMemoryErrorなら断片化と判断（→本来はリセット）
+web_recovery_pending = False  # ⓐ自己復旧：トリガー条件成立フラグ。今は検知のみ（reset実行は担保＝未実行）
+wdt = None                  # ハードウォッチドッグ。履歴取得完了＝定常運転入り後に初めて生成（起動フェーズは非監視）
 
 # タイマー
 checkWiFi_timer = Timer(0)
@@ -108,6 +135,24 @@ TIME_TB = [
 ]
 
 
+# 【STEP0】 起動時/履歴取得後の最大連続ブロックを二分探索で実測（gc.mem_free()の総量は断片化を見せないため）
+def probe_largest_block():
+    gc.collect()
+    total = gc.mem_free()
+    lo, hi, best = 0, total, 0
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        try:
+            b = bytearray(mid)
+            del b
+            best = mid
+            lo = mid + 1
+        except MemoryError:
+            hi = mid - 1
+    gc.collect()
+    return total, best  # 整数2値だけ返す（文字列化は呼び出し側でログ出力時に行う）
+
+
 # 【calc】　day[yyyy-mm-dd] から 曜日番号を返す　（0:月, 1:火, 2:水, 3:木, 4:金, 5:土, 6:日）
 def day_from_date(date_str):
     [yyyy, mm, dd] = [int(i) for i in date_str.split('-')]
@@ -144,7 +189,7 @@ def date_of_days_ago(today, days):
 def flip_lcd_orientation():
     global orient
 
-    logger.info('[EXEC] Flip screen.')
+    # H1.5:logger.info('[EXEC] Flip screen.')
 
     if orient == lcd.LANDSCAPE:
         orient = lcd.LANDSCAPE_FLIP
@@ -158,11 +203,11 @@ def flip_lcd_orientation():
 
 # 【exec】　WiFi接続チェック
 def checkWiFi(arg):
-    logger.info('[EXEC] Checking Wi-Fi.')
+    # H1.5:logger.info('[EXEC] Checking Wi-Fi.')
     if not wifiCfg.is_connected():
-        logger.warning('[ERR.] Reconnect to WiFi')
+        # H1.5:logger.warning('[ERR.] Reconnect to WiFi')
         if not wifiCfg.reconnect():
-            logger.warning('[SYS_] == system reset ==')
+            # H1.5:logger.warning('[SYS_] == system reset ==')
             reset()
 
 
@@ -290,6 +335,8 @@ def draw_monthly_charge(charge):
 # 【draw】　TIMEOUT_MAIN秒以上、スマートメーターからのデータが途切れた場合は文字色をグレー表示
 def check_timeout(inst_time):
     global data_mute
+    if wdt is not None:
+        wdt.feed()  # ループ内の各ステージ境界でWDTに餌やり（正常動作中は必ずここを通る／ハング中は通らない）
     if ((utime.time() - inst_time) >= TIMEOUT_MAIN) and (data_mute is False):
         data_mute = True
         draw_wattage(wattage)
@@ -299,7 +346,7 @@ def check_timeout(inst_time):
 
 # 【config】　インスタンスの設定
 def set_instance(config):
-    global bp35a1, ambient_client, logger, calc_charge_func
+    global bp35a1, logger, calc_charge_func
 
     status('Create objects', uncolor)
     bp35a1 = BP35A1(config['B_ID'],
@@ -310,15 +357,8 @@ def set_instance(config):
                     unit,
                     progress_func=progress,
                     log_level=config['LOG_LEVEL'])
-    logger.info('[INIT] BP35A1 config: (%s, %s, %s)', config['B_ID'],
-                config['B_PASSWORD'], config['COLLECT_CALENDAR'])
-
-    # Ambient のアカウント設定
-    if (config['A_ID'] != '*') and (config['A_KEY'] != '*'):
-        import ambient
-        ambient_client = ambient.Ambient(config['A_ID'], config['A_KEY'])
-        logger.info('[INIT] Ambient config: (%s, %s)',
-                    config['A_ID'], config['A_KEY'])
+    # H1.5:logger.info('[INIT] BP35A1 config: (%s, %s, %s)', config['B_ID'],
+                # H1.5:config['B_PASSWORD'], config['COLLECT_CALENDAR'])
 
     calc_instance = CalcCharge(
         config['BASE'],    # 基本料金
@@ -334,22 +374,23 @@ def set_instance(config):
         calc_charge_func = getattr(calc_instance, config['CHARGE_FUNC'])
     except Exception as e:
         status('No calc_charge_method !', 0xff0000)
-        logger.error('[INIT] %s', e)
+        # H1.5:logger.error('[INIT] %s', e)
         beep()
         utime.sleep(30)
         sys.exit()
 
-    logger.info('[INIT] Charge Function: %s', calc_charge_func.__name__)
+    # H1.5:logger.info('[INIT] Charge Function: %s', calc_charge_func.__name__)
 
-    log_level = getattr(logging, config['LOG_LEVEL'], None)
-    logging.basicConfig(level=log_level)
-    logger.info('[INIT] Logging level = %s', config['LOG_LEVEL'])
+    # H1.5:log_level = getattr(logging, config['LOG_LEVEL'], None)
+    # H1.5:logging.basicConfig(level=log_level)
+    # H1.5:logger.info('[INIT] Logging level = %s', config['LOG_LEVEL'])
 
 
 # 【config】　設定用GSSから設定をリロード
 def reload_config(config):
     global TIMEOUT_MAIN, WARNING_AMPERAGE, CONTRACT_AMPERAGE
     global collect, monthly_e_energy, charge
+    global WEB_GAS_URL
     # global inst_time, cumul_time, cumul_flag
 
     lcd.clear()
@@ -357,6 +398,8 @@ def reload_config(config):
 
     config = cnfg.update_config_from_gss(api_config, config)
     cnfg.save_config(config)
+    WEB_GAS_URL = config.get('WEB_GAS_URL', '')  # GSSでURLが変わっていれば送信先も更新
+    _set_web_endpoint()
     config, TIMEOUT_MAIN, WARNING_AMPERAGE, CONTRACT_AMPERAGE = cnfg.set_config(config)
     set_instance(config)  # インスタンスを再定義
     collect, _, _, monthly_e_energy, charge, _ = send_cumul()  # 料金を再計算
@@ -373,21 +416,21 @@ def send_unit(unit_flag, unit_count):
     if unit_flag is False:
         espnow.broadcast(data=str('M:UNT=' + str(UNIT)))
         unit_flag = True
-        logger.info('[UNIT] -> %.1f', UNIT)
+        # H1.5:logger.info('[UNIT] -> %.1f', UNIT)
     else:
         unit_count += 1
-        logger.debug('[UNIT] Skip UNIT Request: counter = %d', unit_count)
+        # H1.5:logger.debug('[UNIT] Skip UNIT Request: counter = %d', unit_count)
         if unit_count >= 10:  # 最大リトライ回数
             unit_count = 0
             unit_flag = False
-            logger.debug('[UNIT] Reset UNIT Counter')
+            # H1.5:logger.debug('[UNIT] Reset UNIT Counter')
 
     return unit_flag, unit_count
 
 
 # 【send】 積算電力量　取得 ＆ 表示 & 子機送信
 def send_cumul():
-    logger.debug('[CUML] == Monthly e-Energy & Monthly Charge ==')
+    # H1.5:logger.debug('[CUML] == Monthly e-Energy & Monthly Charge ==')
 
     result = False
     _collect = collect
@@ -415,7 +458,7 @@ def send_cumul():
             _charge, _monthly_e_energy = calc_charge_func(config['CONTRACT_AMPERAGE'],
                                                           _hourly_power, _created_day, UNIT)
 
-            logger.debug('[CUML] -> hourly_power = %s', _hourly_power)
+            # H1.5:logger.debug('[CUML] -> hourly_power = %s', _hourly_power)
             del _hourly_power
             gc.collect()
 
@@ -423,19 +466,23 @@ def send_cumul():
         CUML = str('M:CUML' + str(_collect) + '/' + str(_created) + '/' + str(_e_energy) + '/'
                    + str(_monthly_e_energy) + '/' + str(_charge))
         espnow.broadcast(data=CUML)
-        logger.info('[CUML] -> [%s]', str(CUML))
+        # H1.5:logger.info('[CUML] -> [%s]', str(CUML))
+
+        # Web ダッシュボード(GAS)へも同じタイミングで送信
+        send_web_cuml(_collect, _created, _e_energy, _monthly_e_energy, _charge)
 
         result = True
 
     except Exception as e:
-        logger.error('[CUML] %s', e)
+        # H1.5:logger.error('[CUML] %s', e)
+        pass
 
     return _collect, _created, _e_energy, _monthly_e_energy, _charge, result
 
 
 # 【send】 瞬時電力・瞬時電流　取得 ＆ 表示 ＆ 子機送信
 def send_inst():
-    logger.debug('[INST] == Wattage & Amperage ==')
+    # H1.5:logger.debug('[INST] == Wattage & Amperage ==')
 
     result = False
     _wattage = wattage
@@ -448,47 +495,261 @@ def send_inst():
         # 子機送信：瞬時電力、瞬時電力発信
         if isinstance(_wattage, int) and isinstance(_amperage, float):
             espnow.broadcast(data=str('M:INST' + str(_wattage) + '/' + str(_amperage)))
-            logger.info('[INST] -> [%s , %s]', str(_wattage), str(_amperage))
+            # H1.5:logger.info('[INST] -> [%s , %s]', str(_wattage), str(_amperage))
             result = True
 
         else:
             raise Exception('Illeagal data: [' + _wattage + ']-[' + _amperage + ']')
 
     except Exception as e:
-        logger.error('[INST] %s', e)
+        # H1.5:logger.error('[INST] %s', e)
+        pass
 
     return _wattage, _amperage, result
 
 
-# 【send】 Ambientデータ送信：Send every 30 seconds
-def send_ambient():
+# 【send】 GASへのPOSTの単一チョークポイント。無応答での無限ブロック（=例外もreturnも出ず
+# finally:reset()に到達できない唯一のフリーズ経路）を settimeout で断つ。
+# ※urequestsのtimeout=引数は非対応、かつ usocket.socket の差し替え（モンキーパッチ）も不可
+#   （このFWでは frozen module の属性を再代入すると urequests 側が 'no attribute socket' で全滅）。
+#   →実機実証済みの生プリミティブ（usocket+ussl+settimeout）で自前POSTする。ussl の read は
+#   下位ソケットの settimeout を尊重し、無応答は約WEB_POST_TIMEOUT秒で ETIMEDOUT。呼び出し側の
+#   try/except が拾い、再起動せず（inst/cumlはスキップ・backfillは再送信キューへ）復帰する。
+# WEB_GAS_URL は config 読込後に確定するため、import時ではなく _set_web_endpoint() で host/path を
+# 解く。未設定（空）の間は _WEB_HOST が '' のままで、_web_post は no-op になる（送信スキップ）。
+_WEB_HOST = ''
+_WEB_PATH = ''
 
+
+def _set_web_endpoint():
+    # config['WEB_GAS_URL'] を host / path に分解して _web_post 用グローバルへ格納。
+    # 起動時（config読込後）と reload_config（GSSリロード後）から呼ぶ。空URLなら両方 '' に。
+    global _WEB_HOST, _WEB_PATH
+    try:
+        _p = WEB_GAS_URL.split('/', 3)
+        _WEB_HOST = _p[2]                # 'script.google.com'
+        _WEB_PATH = '/' + _p[3]         # '/macros/s/..../exec'
+    except Exception:
+        _WEB_HOST = ''
+        _WEB_PATH = ''
+
+
+class _WebResp:
+    # 呼び出し側は response.close() を呼ぶだけ（status_codeは未使用）
+    def close(self):
+        pass
+
+
+def _web_post(payload):
+    # WEB_GAS_URL 未設定(config読込失敗・空文字等)を「成功扱いで送信スキップ」にすると、実際には
+    # 一切送信していないのに呼び出し元が延々と「OK」と表示し続け、異常に気づけない（2026-08-01夜、
+    # 実機でこれが原因の長時間サイレント障害を確認済み）。未設定は例外にして呼び出し元の
+    # except節（既存のリトライ/エラーカウント経路）に必ず引っ掛ける。
+    if not _WEB_HOST:
+        raise OSError('WEB_GAS_URL not set')
+    ai = usocket.getaddrinfo(_WEB_HOST, 443)[0][-1]
+    so = usocket.socket()
+    so.settimeout(WEB_POST_TIMEOUT)
+    try:
+        so.connect(ai)
+        try:
+            ss = ussl.wrap_socket(so, server_hostname=_WEB_HOST)
+        except TypeError:
+            ss = ussl.wrap_socket(so)   # server_hostname 非対応FW向けフォールバック
+        req = ('POST ' + _WEB_PATH + ' HTTP/1.0\r\n'
+               + 'Host: ' + _WEB_HOST + '\r\n'
+               + 'Content-Type: application/json\r\n'
+               + 'Content-Length: ' + str(len(payload)) + '\r\n'
+               + 'Connection: close\r\n\r\n' + payload)
+        ss.write(req.encode())
+        ss.read(32)   # 応答の頭を読む＝doPost処理(シート追記/PROP更新)完了を確認。無応答はsettimeoutで例外化
+        try:
+            ss.close()
+        except Exception:
+            pass
+        return _WebResp()
+    finally:
+        try:
+            so.close()
+        except Exception:
+            pass
+
+
+# 【send】 起動時に reset_cause を GAS へ報告（type:'boot'）。GAS側で累積再起動回数＋タイムスタンプ
+# ログを恒久保存し、再起動頻度を把握する。本機はRTCが再起動を跨がないためGAS側が記録の本体。
+# best-effort（1回・失敗しても起動を止めない）。
+def _send_boot_report():
+    if not BLACKBOX_ENABLED:
+        return
+    try:
+        _cause = reset_cause()
+        resp = _web_post(ujson.dumps({'type': 'boot', 'cause': _cause}))
+        resp.close()
+        print('[BOOT] reported cause=%d' % _cause)
+    except Exception as e:
+        print('[BOOT] report failed: %s' % e)
+
+
+# 【send】 Web ダッシュボード(GAS)へ積算電力量データ送信：M:CUMLと同じタイミング
+def send_web_cuml(collect, created, e_energy, monthly_e_energy, charge):
+    global web_oom_count
     result = False
 
+    print('[NET]cuml')  # [NET_DIAG] WDTハングの犯人特定用マーカー（一時・特定後に削除）
     try:
-        if ambient_client:
-            a_result = ambient_client.send({'d1': amperage,
-                                            'd2': wattage,
-                                            'd3': monthly_e_energy,
-                                            'd4': charge})
-
-            result = True
-
-            if a_result.status_code != 200:
-                raise Exception('ambient.send() failed. status: ', a_result.status_code)
+        payload = ujson.dumps({
+            'type': 'cuml',
+            'collect': collect,
+            'created': created,
+            'e_energy': e_energy,
+            'monthly_e_energy': monthly_e_energy,
+            'charge': charge,
+        })
+        response = _web_post(payload)
+        response.close()
+        result = True
+        web_oom_count = 0
 
     except Exception as e:
-        logger.error('[AMBIENT] %s', e)
+        # GASは doPost() 実行後に302リダイレクトを返すため、urequestsが
+        # "Redirects not yet supported" 例外を出すが、処理自体は成功している（実機検証済み）
+        if 'Redirect' in str(e):
+            result = True
+            web_oom_count = 0
+        else:
+            # 履歴取得後(hist_flag[data_period])のMemoryErrorだけ断片化シグナルとして数える
+            if isinstance(e, MemoryError) and hist_flag[data_period]:
+                web_oom_count += 1
+            print('[WEB_] cuml ERR %s: %s' % (type(e).__name__, e))  # backfillと同様エラー内容を可視化(恒久)
 
     return result
+
+
+# 【send】 Web ダッシュボード(GAS)へ瞬時電力データ送信：WEB_INST_INTERVAL秒おきに間引き
+# muted: スマートメーターからのデータ途絶中（data_mute）かどうか。本体LCDのグレー表示と同じ意味合い
+def send_web_inst(wattage, amperage, muted):
+    global web_oom_count
+    result = False
+    mf = gc.mem_free()  # 送信前の空きヒープ（整数で先取り＝送信を汚染しない）
+
+    print('[NET]inst')  # [NET_DIAG] WDTハングの犯人特定用マーカー（一時・特定後に削除）
+    try:
+        payload = ujson.dumps({'type': 'inst', 'watt': wattage, 'amp': amperage, 'muted': muted})
+        response = _web_post(payload)
+        response.close()
+        result = True
+        web_oom_count = 0
+
+    except Exception as e:
+        # GASは doPost() 実行後に302リダイレクトを返すため、urequestsが
+        # "Redirects not yet supported" 例外を出すが、処理自体は成功している（実機検証済み）
+        if 'Redirect' in str(e):
+            result = True
+            web_oom_count = 0
+        else:
+            # 履歴取得後(hist_flag[data_period])のMemoryErrorだけ断片化シグナルとして数える
+            if isinstance(e, MemoryError) and hist_flag[data_period]:
+                web_oom_count += 1
+            print('[WEB_] inst ERR %s: %s mf%d' % (type(e).__name__, e, mf))  # backfillと同様エラー内容を可視化(恒久)
+
+    # H1.5:logger.info('[WEB_] inst mf %d/%d oom%d', mf, gc.mem_free(), web_oom_count)
+    return result
+
+
+# 【calc】 hist_date[d]（"M/D"形式・年無し）を、年を補完した"YYYY-MM-DD"に変換する。
+# hist_created[d]は「取得した時刻」（≒常に今日）であり、その日のデータの実際の日付ではないため、
+# バックフィルの日付には使えない（hist_date[d]の方が正しい日付）
+def hist_date_to_full(d):
+    today_str = hist_created[0][:10]  # "YYYY-MM-DD"（hist_created[0]は当日分なので今日の日付として使える）
+    today_year = int(today_str[:4])
+    today_month = int(today_str[5:7])
+    today_day = int(today_str[8:10])
+
+    parts = hist_date[d].split('/')
+    month = int(parts[0])
+    day = int(parts[1])
+
+    year = today_year
+    if (month, day) > (today_month, today_day):  # 今日より後の月日なら年をまたいでいる＝前年
+        year -= 1
+
+    return '{:04d}-{:02d}-{:02d}'.format(year, month, day)
+
+
+# 【send】 Web ダッシュボード(GAS)へ履歴データ送信（半日分、BP35A1から取得した直後にその場で送る）
+# キューに積んで後でまとめて送ると、子機リクエストの有無に依存したり、履歴取得完了直後に
+# 一気に送信が集中したりするため、取得済みの1日分が確定した瞬間にここで送ってしまう。
+# 1日分（48点）を一度に送るとペイロード確保がMemoryErrorになりやすいことが実機検証で
+# 再確認できたため、半日（24点）ずつ2回に分けて送る（旧backfill_queue方式と同じ粒度）。
+# 確定済みの過去日（d>=1）はe_energy==0（メーター交換等でデータが無い時間帯）もスキップせず送る。
+# GAS側で交換以前を0埋めとして扱い、現在値との差分計算を交換を挟んでも特別扱いせずに済ませるため。
+# 今日（d=0）だけは0を未計測（まだ24時になっていない）として送らない（過去日の0埋めとは別の意味）。
+def send_web_hist_half(d, half):
+    if not WEB_HIST_SEND_ENABLED:
+        return True
+
+    date_str = hist_date_to_full(d)
+    points = []
+    for k in range(half * 24, half * 24 + 24):
+        if d == 0 and hist_data[d][k] == 0:
+            continue  # 今日(d=0)はまだ24時になっていない＝未来分の0は「未計測」なので送らない
+        time_str = '{:02d}:{:02d}:00'.format(k // 2, (k % 2) * 30)
+        points.append({
+            'created': date_str + ' ' + time_str,
+            'e_energy': round(hist_data[d][k] * UNIT, 1)
+        })
+
+    if not points:
+        return True  # 送る対象が無い＝再送信の必要も無いので成功扱い
+
+    gc.collect()
+    mf = gc.mem_free()  # 送信直前の空きヒープ（整数で先取り＝核心のTLS確保を汚染しない。文字列ログは送信後）
+    _bf_total, _bf_largest = probe_largest_block()
+    print('[BF] d%d half%d pre total=%d largest=%d' % (d, half, _bf_total, _bf_largest))  # [BF_TREND]
+
+    try:
+        payload = ujson.dumps({'type': 'backfill', 'points': points})
+        response = _web_post(payload)
+        response.close()
+        print('[BF] d%d half%d OK %dpt' % (d, half, len(points)))  # [BF_TREND]
+        return True
+
+    except Exception as e:
+        if 'Redirect' in str(e):
+            print('[BF] d%d half%d OK(redirect) %dpt' % (d, half, len(points)))  # [BF_TREND]
+            return True
+        else:
+            print('[BF] d%d half%d ERR %s mf%d' % (d, half, type(e).__name__, mf))  # [BF_TREND]
+            return False
+
+
+def send_web_hist_day(d):
+    if not send_web_hist_half(d, 0):
+        hist_retry_queue.append((d, 0))
+    if not send_web_hist_half(d, 1):
+        hist_retry_queue.append((d, 1))
+
+
+# 【send】 送信失敗した(日, half)の再送信。メインループ1回につき1件だけ試し、
+# 失敗したら末尾に戻して次の機会にまた試す（即時リトライだとヒープ状態が変わらず
+# 同じ理由で再失敗し続けるだけなので、他の処理を挟んで断片化レイアウトが変わる
+# 機会を待つ。データ欠損を許容しないため回数上限は設けない）。
+def send_web_hist_retry_one():
+    if not hist_retry_queue:
+        return
+
+    d, half = hist_retry_queue.pop(0)
+    if not send_web_hist_half(d, half):
+        hist_retry_queue.append((d, half))
 
 
 # 【exec】　積算電力-履歴データ取得
 def get_hist_data():
     global hist_day, hist_flag, hist_created, hist_date, hist_data, day_shift, cumul_flag
-    global hist_time, cumul_time
-    
-    logger.info('[INIT] Get Historical DATA')
+    global hist_time, cumul_time, web_oom_count
+
+    # H1.5:logger.info('[INIT] Get Historical DATA')
+    web_oom_count = 0  # ⓐ再取得開始時にリセット（取得中は誤発火させない。hist_flag[data_period]もFalseに戻る）
 
     del hist_data
 
@@ -513,59 +774,16 @@ def get_hist_data():
     beep()
 
 
-# 【exec】 取得済みの積算電力-履歴データを子機に続けて送信
-def send_all_hist_data(id):
-    logger.info('[INIT] Continuously send all hist. data.')
-    _hist_time = [utime.time() - 1200] * (data_period + 1)  # HIST タイマー
-    _time = utime.time()
-    recv = True  # データ受信フラグ
-    while utime.time() - _time < 30:  # 子機からのリクエストが30秒以上途絶えたら終了
-
-        # 指定秒数以内の重複リクエストはスキップ
-        if recv and hist_flag[id] is True and utime.time() - _hist_time[id] > 30:
-            _send_data = ''
-            for k in range(0, 49):
-                _send_data += '{:08X}'.format(hist_data[id][k])
-            send_data = (bytes('M:ID{:02}{}{:5}'
-                               .format(id, hist_created[id], hist_date[id]), 'UTF-8')
-                         + binascii.unhexlify(_send_data + '00'))
-            espnow.broadcast(data=send_data)
-            _hist_time[id] = utime.time()
-            _time = utime.time()
-
-            logger.info('[HIST] -> [(%d) %s [%s %.1f - %.1f : %.1f]]',
-                        id, hist_created[id],
-                        hist_date[id],
-                        hist_data[id][0] * UNIT,
-                        hist_data[id][47] * UNIT,
-                        hist_data[id][48] * UNIT)
-            logger.debug('[HIST] -> Raw = %s', hist_data[id])
-            # logger.debug('[HIST] -> [%d, %s]', id, binascii.hexlify(send_data).decode('utf-8'))
-            if id == 30:
-                return id, _hist_time
-
-        recv = False
-        while not recv and utime.time() - _time < 30:  # 子機からのリクエストが30秒以上途絶えたら終了
-            d = espnow.recv_data()
-            if (len(d[2]) > 0):
-                key = str(d[2].decode().strip())
-                logger.info('[RECV] <- Key = [%s]', key)
-                if key.startswith('REQ'):
-                    id = int(key[3:5])
-                    recv = True  # データ受信フラグ
-
-    return id, _hist_time
-
-
 if __name__ == '__main__':
 
     try:
         # logger 初期化
-        logging.basicConfig(level=logging.INFO)
-        logger = logging.getLogger(logger_name)
+        # H1.5:logging.basicConfig(level=logging.INFO)
+        # H1.5:logger = logging.getLogger(logger_name)
 
         # WiFi　&ESP-NOW 設定
-        lcd.orient(lcd.PORTRAIT_FLIP)
+        lcd.orient(orient)  # 横向き（純正のWiFi画面を使わないので縦向きにする必要が無い）
+        lcd.clear()
         # WiFi接続：接続できるまで自動リトライする。従来の autoConnect(lcdShow=True) は失敗時に
         # UIFlowのオレンジ再接続画面でボタン待ち＝停止してしまうため、lcdShow=Falseで自前ループにする。
         # 画面表示は起動時の他メッセージと同じ status()（横向き・中央、シリアルにも[STAT]で出る）に揃える。
@@ -596,7 +814,19 @@ if __name__ == '__main__':
         status('Welcome to SMM3 !', uncolor)
 
         # 定数の読み込み（ファイル、Googleスプレッドシート）
+        # ファイル読込(ローカルI/Oのみ・ネットワーク無し)の直後に GAS送信先を確定してboot報告を送る。
+        # GSS読込(get_api_config/update_config_from_gss、urequestsでのネットワークGET)より前に置くのは、
+        # config化前の「WiFi接続直後にboot報告」に近い性質を保つため（他のネットワーク処理より先に
+        # GASへの最初の接続を試みる）。なお2026-08-01夜の障害調査では、この順序自体は原因ではなく、
+        # 真因は WEB_GAS_URL が config_main.json から空で読み込まれていたこと（検証用に別バージョンを
+        # 交互デプロイした際、save_config()がWEB_GAS_URLキー無しの状態で上書き保存してしまっていた）
+        # と判明した。空URL時に_web_postが例外を出さず黙って成功扱いを返していたため長時間気づけな
+        # かった（_web_post側は修正済み、下記参照）。
         config = cnfg.update_config_from_file(config)
+        WEB_GAS_URL = config.get('WEB_GAS_URL', '')
+        _set_web_endpoint()
+        _send_boot_report()  # 起動報告（GASで再起動回数/頻度を把握）。URL未設定なら no-op。
+
         api_config = cnfg.get_api_config()
         config = cnfg.update_config_from_gss(api_config, config)
         cnfg.save_config(config)
@@ -620,8 +850,8 @@ if __name__ == '__main__':
         # Connecting to Smart Meter
         status('Connecting SmartMeter', uncolor)
         (channel, pan_id, mac_addr, lqi, ipv6_addr, coefficient, unit) = bp35a1.open()
-        logger.info('[INIT] Connected. BP35A1: (%s, %s, %s, %s, %s)',
-                    channel, pan_id, mac_addr, lqi, ipv6_addr)
+        # H1.5:logger.info('[INIT] Connected. BP35A1: (%s, %s, %s, %s, %s)',
+                    # H1.5:channel, pan_id, mac_addr, lqi, ipv6_addr)
 
         # 親機起動を通知
         espnow.broadcast(data='M:BOOT')
@@ -659,8 +889,8 @@ if __name__ == '__main__':
         hist_time = [utime.time() - 1200] * (data_period + 1)  # HIST タイマー
         cumul_time = utime.time() - 1200  # CUML タイマー
         inst_time = utime.time() - 1200  # INST タイマー
-        ambient_time = utime.time() - 1200  # Ambient タイマー
         ping_time = utime.time() - 1200  # ping タイマー
+        web_inst_time = utime.time() - 1200  # Web 瞬時電力 タイマー
         
         # 画面初期化
         lcd.clear()
@@ -670,9 +900,18 @@ if __name__ == '__main__':
 
         retries = 0  # リトライカウンターリセット
 
+        _total, _largest = probe_largest_block()
+        print('[WEB_] mem at boot (before main loop): total=%d largest=%d' % (_total, _largest))  # [STEP0][A]
+
+        # ※ハードウォッチドッグ(wdt)は「履歴取得が完了して定常運転に入った後」に初めて生成する（下の完了分岐）。
+        #   起動時の履歴取得はフラッキーなメーターや起動直後のネットワーク一斉送信で正当に120s超のことがあり、
+        #   ここで生成するとWDTが誤発火→リセット→また履歴取得の頭でハマる＝ブートループになるため。
+        #   報告されたフリーズは定常運転中(数日に1回)のGAS送信で発生しており、そこだけ守れば十分。
 
         # メインループ
         while retries < max_retries:
+            if wdt is not None:
+                wdt.feed()  # ループ先頭で毎周feed（定常運転入り＝wdt生成後のみ）
 
             # 【INST】 瞬時電力・瞬時電流　取得 ＆ 表示 ＆ 子機送信：Updated every 10 seconds
             if (utime.time() - inst_time) >= 10:
@@ -727,7 +966,7 @@ if __name__ == '__main__':
                             if hist_day < data_period:
                                 hist_day += 1
                             day_shift = 0
-                            logger.info('[EXEC] Day-to-Day processed!')
+                            # H1.5:logger.info('[EXEC] Day-to-Day processed!')
                             ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)  # 時計合わせ
                         # 履歴データ → hist_data
                         hist_data[0][TIME_TB.index(created_time)] = int(e_energy / UNIT)
@@ -748,7 +987,7 @@ if __name__ == '__main__':
             
             if (len(d[2]) > 0):
                 key = str(d[2].decode().strip())
-                logger.info('[RECV] <- Key = [%s]', key)
+                # H1.5:logger.info('[RECV] <- Key = [%s]', key)
 
                 # # 【UNIT】 UNIT を子機に送信する場合
                 # # 'UNIT' 積算電力量-[単位x係数]のリクエストに応答
@@ -763,10 +1002,6 @@ if __name__ == '__main__':
                         cumul_flag = False
                         cumul_time = utime.time() - 1200
 
-                        # 取得済みの履歴データを一気に子機に送信する場合。送信中は瞬時計測値等は更新しない
-                        # if hist_flag[0] is True:
-                        #     id, hist_time = send_all_hist_data(id)
-
                     # 指定秒数以内の重複リクエストはスキップ
                     if hist_flag[id] is True and utime.time() - hist_time[id] > 30:
                         _send_data = ''
@@ -778,13 +1013,13 @@ if __name__ == '__main__':
                         espnow.broadcast(data=send_data)
                         hist_time[id] = utime.time()
 
-                        logger.info('[HIST] -> [(%d) %s [%s %.1f - %.1f : %.1f]]',
-                                    id, hist_created[id],
-                                    hist_date[id],
-                                    hist_data[id][0] * UNIT,
-                                    hist_data[id][47] * UNIT,
-                                    hist_data[id][48] * UNIT)
-                        logger.debug('[HIST] -> Raw = %s', hist_data[id])
+                        # H1.5:logger.info('[HIST] -> [(%d) %s [%s %.1f - %.1f : %.1f]]',
+                                    # H1.5:id, hist_created[id],
+                                    # H1.5:hist_date[id],
+                                    # H1.5:hist_data[id][0] * UNIT,
+                                    # H1.5:hist_data[id][47] * UNIT,
+                                    # H1.5:hist_data[id][48] * UNIT)
+                        # H1.5:logger.debug('[HIST] -> Raw = %s', hist_data[id])
                         # logger.debug('[HIST] -> [%d, %s]', id, binascii.hexlify(send_data).decode('utf-8'))
 
                 check_timeout(inst_time)  # スマートメーターからのデータのタイムアウト判定
@@ -814,13 +1049,15 @@ if __name__ == '__main__':
                         hist_date[hist_day] = date_of_days_ago(_created_date, hist_day + day_shift)
                         hist_flag[hist_day] = True
 
-                        logger.info('[HIST] <= BP35A1: [(%d) %s [%s %.1f - %.1f : %.1f]]',
-                                    hist_day, hist_created[hist_day],
-                                    hist_date[hist_day],
-                                    hist_data[hist_day][0] * UNIT,
-                                    hist_data[hist_day][47] * UNIT,
-                                    hist_data[hist_day][48] * UNIT)
-                        logger.debug('[HIST] <= BP35A1: Raw = %s', hist_data[hist_day])
+                        # H1.5:logger.info('[HIST] <= BP35A1: [(%d) %s [%s %.1f - %.1f : %.1f]]',
+                                    # H1.5:hist_day, hist_created[hist_day],
+                                    # H1.5:hist_date[hist_day],
+                                    # H1.5:hist_data[hist_day][0] * UNIT,
+                                    # H1.5:hist_data[hist_day][47] * UNIT,
+                                    # H1.5:hist_data[hist_day][48] * UNIT)
+                        # H1.5:logger.debug('[HIST] <= BP35A1: Raw = %s', hist_data[hist_day])
+
+                        send_web_hist_day(hist_day)  # 取得直後にその場でGASへ送信（キュー無し）
 
                         if hist_day < data_period:
                             hist_data[hist_day + 1][48] = hist_data[hist_day][0]
@@ -829,33 +1066,53 @@ if __name__ == '__main__':
                         else:
                             beep()
                             t =utime.time() - init_time
-                            logger.info('[HIST] Data acquisition completed. time = %d', t)
+                            # H1.5:logger.info('[HIST] Data acquisition completed. time = %d', t)
+                            _total, _largest = probe_largest_block()
+                            print('[WEB_] mem after history acquisition: total=%d largest=%d' % (_total, _largest))  # [STEP0][B]
                             indicator_timer.deinit()
                             lcd.circle(234, 7, 3, 0x000000, 0x000000)
                             cumul_flag = False
                             cumul_time = utime.time() - 1200
+                            # 定常運転入り：ここで初めてWDT起動（以降のGAS無応答ハングを約120sで検知→復帰）。
+                            # 起動フェーズは非監視のままにしてブートループを避ける。
+                            if wdt is None:
+                                wdt = WDT(timeout=WDT_TIMEOUT_MS)
+                                print('[WEB_] WDT armed (steady state)')
 
                         retries = 0
 
                 except Exception as e:
-                    logger.error('[HIST] %s', e)
+                    # H1.5:logger.error('[HIST] %s', e)
                     hist_flag[hist_day] = False
                     retries += 1
 
             check_timeout(inst_time)  # スマートメーターからのデータのタイムアウト判定
 
-            # 【AMBIENT】 Ambientデータ送信：Send every config['A_INTERVAL'] seconds
-            if (utime.time() - ambient_time) >= config['A_INTERVAL']:
-                result = send_ambient()
-                ambient_time = utime.time()
-                if result is True:
-                    retries = 0
-                else:
-                    retries += 1
+            # 【WEB_INST】 Web ダッシュボード(GAS)へ瞬時電力送信：Send every WEB_INST_INTERVAL seconds
+            if (utime.time() - web_inst_time) >= WEB_INST_INTERVAL:
+                send_web_inst(wattage, amperage, data_mute)
+                web_inst_time = utime.time()
+
+            # 【WEB_HIST_RETRY】 履歴データ送信に失敗した(日, half)があれば、メインループ1回につき1件だけ再送信
+            if hist_retry_queue:
+                send_web_hist_retry_one()
+
+            # 【WEB_RECOVERY】 ⓐ自己復旧（検知のみ・reset実行は担保＝まだ呼ばない）：
+            # 履歴取得後にweb送信(inst/cuml)が連続でMemoryError＝ヒープ断片化でGAS盲目化。
+            # ambient成功が既存ウォッチドッグ(retries)を無効化するため別系統で検知する。
+            # まず実機で「正しいタイミングでフラグが立つか」をログ検証し、確認後にreset()を有効化する。
+            if web_oom_count == 0:
+                web_recovery_pending = False
+            elif (hist_flag[data_period] and web_oom_count >= WEB_OOM_RESET
+                  and not web_recovery_pending):
+                web_recovery_pending = True
+                # H1.5:logger.critical('[WEB_] OOM x%d -> recovery TRIGGER (flag only, reset deferred)',
+                                # H1.5:web_oom_count)
+                # reset()  # ← 実機でフラグ動作を確認後に有効化する（根治はarray.array化＝別途）
 
             # 【PING】 動作確認：Ping every 1 hour
             if (utime.time() - ping_time) >= (60 * 60):
-                logger.info('[SYS_] Ping BP35A1')
+                # H1.5:logger.info('[SYS_] Ping BP35A1')
                 bp35a1.skPing()
                 ping_time = utime.time()
                         
@@ -864,8 +1121,9 @@ if __name__ == '__main__':
             # print('[SYS_] mem_free = {} byte'.format(gc.mem_free()))
 
     except Exception as e:
-        logger.error('[ERR.] == Final Exception ==: %s', e)
+        # H1.5:logger.error('[ERR.] == Final Exception ==: %s', e)
+        pass
 
     finally:
-        logger.critical('[SYS_] == system reset ==')
+        # H1.5:logger.critical('[SYS_] == system reset ==')
         reset()

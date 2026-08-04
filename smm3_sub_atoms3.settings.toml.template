@@ -1,0 +1,6 @@
+# CircuitPython設定ファイル テンプレート
+# このファイルをATOM S3の /CIRCUITPY/settings.toml にコピーして使う
+# (このテンプレート自体はgitに入れてOK。実際のsettings.tomlは入れない)
+
+WIFI_SSID = "ここにSSIDを入力"
+WIFI_PASSWORD = "ここにパスワードを入力"

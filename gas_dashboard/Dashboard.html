@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1f77b4">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      margin: 0; padding: 0; background: #111; color: #eee;
+      transition: background-color .4s;
+    }
+    /* 状態監視：無音(stale)検知時は画面全体を派手に警告色へ */
+    body.alert-stale { background: #6e0000; }
+    body.alert-stale .tabs { background: #6e0000; }
+    #healthBanner {
+      display: none; text-align: center; font-weight: bold; color: #fff;
+      background: #c0392b; padding: 12px 8px; font-size: 15px; letter-spacing: .02em;
+      animation: hbpulse 1.1s infinite;
+    }
+    @keyframes hbpulse { 0%,100% { opacity: 1; } 50% { opacity: .5; } }
+    body.alert-stale #healthBanner { display: block; }
+    .tabs { display: flex; position: sticky; top: 0; background: #111; }
+    .tabs button {
+      flex: 1; padding: 14px 0; background: #222; color: #aaa;
+      border: none; font-size: 21px;
+    }
+    .tabs button.active { background: #1f77b4; color: #fff; }
+    .page { display: none; padding: 16px; }
+    .page.active { display: block; }
+    .watt {
+      display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline;
+      font-size: 102px; text-align: center; font-weight: bold; color: #1f77b4;
+    }
+    .watt .wattGroup { display: flex; align-items: baseline; white-space: nowrap; }
+    .unit { font-size: 35px; color: #888; }
+    .amp { display: flex; align-items: baseline; white-space: nowrap; font-size: 48px; font-weight: bold; color: #1f77b4; margin-left: 18px; }
+    .amp .unit { font-size: 26px; }
+    #watt.muted, .amp.muted { color: #555; }
+    .sub { text-align: center; color: #888; font-size: 26px; margin-top: 4px; }
+    .sub.updated { font-size: 15.6px; }
+    .stats { display: flex; justify-content: space-around; margin-top: 4px; }
+    .stats div { text-align: center; }
+    .stats .val { font-size: 44px; font-weight: bold; }
+    .stats .lbl { font-size: 22px; color: #888; margin-top: 2px; }
+    canvas { max-height: 260px; }
+    .chart-toggle { display: flex; justify-content: flex-end; gap: 16px; margin-top: 8px; }
+    .chart-toggle label { display: flex; align-items: center; color: #aaa; font-size: 14px; gap: 6px; }
+    .chart-toggle input[type="checkbox"] {
+      accent-color: #555;
+      -webkit-appearance: none; appearance: none;
+      width: 14px; height: 14px; margin: 0;
+      background-color: #333; border: 1px solid #555; border-radius: 2px;
+    }
+    .chart-toggle input[type="checkbox"]:checked {
+      background-color: #555;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23ddd' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M3 8l3.5 3.5L13 4.5'/%3E%3C/svg%3E");
+      background-size: 11px 11px; background-repeat: no-repeat; background-position: center;
+    }
+    .chart-toggle .swatch { display: inline-block; width: 12px; height: 12px; background: #24293a; }
+    .chart-toggle .swatch.excess { background: #9c4a45; }
+    .chart-toggle .swatch.sub { background: #195f90; }
+    .chart-toggle .swatch.rem { background: #0c3650; }
+    .chart-toggle label.disabled { opacity: 0.4; }
+    .tbl-caption { font-size: 13px; color: #aaa; margin: 20px 0 8px; }
+    table.hourly {
+      width: 100%; border-collapse: collapse; font-size: 15px;
+      /* SF Mono/Menlo/Consolasは0に斜線やドットが入るため避け、0が無地のCourier系を優先 */
+      font-family: 'Courier New', Courier, monospace;
+    }
+    table.hourly th, table.hourly td { padding: 4px 6px; text-align: right; }
+    table.hourly th { color: #888; font-weight: normal; border-bottom: 1px solid #303030; }
+    table.hourly td:first-child, table.hourly th:first-child { text-align: left; color: #d0d000; }
+    table.hourly tr:nth-child(even) td { background: #1a1a1a; }
+    table.hourly .diff-over { color: #d00000; }
+    table.hourly .diff-under { color: #00d000; }
+    table.hourly tfoot td { border-top: 1px solid #303030; font-weight: bold; color: #fff; padding-top: 8px; }
+  </style>
+</head>
+<body>
+  <div id="healthBanner"></div>
+  <div class="tabs">
+    <button class="active" data-page="p-simple">瞬時</button>
+    <button data-page="p-today">今日</button>
+    <button data-page="p-week">週</button>
+    <button data-page="p-month">月</button>
+  </div>
+
+  <div id="p-simple" class="page active">
+    <div class="watt">
+      <span class="wattGroup"><span id="watt">--</span><span class="unit"> W</span></span>
+      <span class="amp" id="ampWrap"><span id="amp">-</span><span class="unit"> A</span></span>
+    </div>
+    <div class="sub" id="cumlPeriod">-</div>
+    <div class="stats">
+      <div><div class="val" id="cumlKwh">-</div><div class="lbl">累積 kWh</div></div>
+      <div><div class="val" id="cumlYen">-</div><div class="lbl">料金 (円)</div></div>
+    </div>
+    <div class="sub updated" id="wattUpdated" style="margin-top: 16px;">-</div>
+  </div>
+
+  <div id="p-today" class="page">
+    <canvas id="chartToday"></canvas>
+    <div class="chart-toggle">
+      <label><input type="checkbox" id="toggleYesterday" checked><span class="swatch"></span>前日</label>
+      <label id="toggleExcessLabel"><input type="checkbox" id="toggleExcess" checked><span class="swatch excess"></span>前日を超過</label>
+    </div>
+    <div class="tbl-caption">時間別比較（今日 vs 前日）</div>
+    <div id="tbl-ytdy"></div>
+  </div>
+  <div id="p-week" class="page">
+    <canvas id="chartWeek"></canvas>
+    <div class="chart-toggle">
+      <label><span class="swatch sub"></span>現在時刻まで</label>
+      <label><span class="swatch rem"></span>終日</label>
+    </div>
+    <div class="tbl-caption">時間別比較（今日 vs 直近7日平均）</div>
+    <div id="tbl-avg7"></div>
+  </div>
+  <div id="p-month" class="page">
+    <canvas id="chartMonth"></canvas>
+    <div class="chart-toggle">
+      <label><span class="swatch sub"></span>現在時刻まで</label>
+      <label><span class="swatch rem"></span>終日</label>
+    </div>
+    <div class="tbl-caption">時間別比較（今日 vs 直近30日平均）</div>
+    <div id="tbl-avg30"></div>
+  </div>
+
+  <script>
+    var DATA = <?!= JSON.stringify(data) ?>;
+    // GASのWebアプリURLはscript.googleusercontent.comへリダイレクトされるため、
+    // window.location.hrefから組み立てると正しいエンドポイントにならない。固定で持つ。
+    var EXEC_URL = <?!= JSON.stringify(execUrl) ?>;
+
+    document.querySelectorAll('.tabs button').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        document.querySelectorAll('.tabs button').forEach(function (b) { b.classList.remove('active'); });
+        document.querySelectorAll('.page').forEach(function (p) { p.classList.remove('active'); });
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.page).classList.add('active');
+        // 非表示(display:none)だったタブの中のcanvasはChart.js生成時にサイズ0で
+        // 確定してしまい、表示してもサイズが復旧しないことがある（特にiOS Safari）。
+        // タブを開いた直後に明示的にresize()してサイズを再計算させる
+        Object.keys(charts).forEach(function (k) {
+          if (charts[k]) charts[k].resize();
+        });
+      });
+    });
+
+    function fmtTime(iso) {
+      var d = new Date(iso);
+      return d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    // "YYYY-MM-DD HH:MM:SS" → "MM-DD"（子機のdraw_main() s = collect[5:10] と同じ切り出し）
+    function fmtDateOnly(s) {
+      return s ? s.slice(5, 10) : s;
+    }
+
+    // 状態監視：health.status が stale なら画面全体を警告色にし、バナーで経過時間を表示
+    function applyHealth(data) {
+      var h = data && data.health;
+      var stale = h && h.status === 'stale';
+      document.body.classList.toggle('alert-stale', !!stale);
+      var banner = document.getElementById('healthBanner');
+      if (banner) {
+        if (stale) {
+          var mins = Math.floor((h.ageSec || 0) / 60);
+          banner.textContent = '⚠ 親機からのデータが約' + mins + '分間途絶えています（最終受信: ' + fmtTime(h.lastSeenAt) + '）';
+        } else {
+          banner.textContent = '';
+        }
+      }
+    }
+
+    function updateCurrent(data) {
+      applyHealth(data);
+      if (data.current) {
+        document.getElementById('watt').textContent = data.current.watt;
+        document.getElementById('watt').classList.toggle('muted', !!data.current.muted);
+        document.getElementById('amp').textContent =
+          (data.current.amp === null || data.current.amp === undefined) ? '-' : data.current.amp;
+        document.getElementById('ampWrap').classList.toggle('muted', !!data.current.muted);
+        var updatedLabel = '更新: ' + fmtTime(data.current.updatedAt);
+        if (data.current.muted) updatedLabel += '（メーター通信途絶中）';
+        document.getElementById('wattUpdated').textContent = updatedLabel;
+      } else {
+        document.getElementById('watt').textContent = '-';
+        document.getElementById('watt').classList.remove('muted');
+        document.getElementById('amp').textContent = '-';
+        document.getElementById('ampWrap').classList.remove('muted');
+        document.getElementById('wattUpdated').textContent = 'データ未取得です';
+      }
+
+      if (data.cuml) {
+        // 累積kWhは電気料金(charge)と同じ起点（collect〜created期間）のmonthly_e_energyを表示する。
+        // e_energyはメーターの生涯累積値で起点が異なるため使わない（子機のdraw_main()と同じ値）
+        document.getElementById('cumlKwh').textContent = data.cuml.monthly_e_energy;
+        document.getElementById('cumlYen').textContent = data.cuml.charge;
+        // 期間表示は日付のみ（子機のdraw_main()と同じくMM-DD、時刻は表示しない）
+        document.getElementById('cumlPeriod').textContent = fmtDateOnly(data.cuml.collect) + ' 〜 ' + fmtDateOnly(data.cuml.created);
+      } else {
+        document.getElementById('cumlKwh').textContent = '-';
+        document.getElementById('cumlYen').textContent = '-';
+        document.getElementById('cumlPeriod').textContent = 'データ未取得です';
+      }
+    }
+
+    // 調査用：どの呼び出しで失敗したか個別に分かるようにtry/catchで包む（用が済んだら削除する）
+    // 各描画を独立してtry/catch：1つが失敗しても他（特に時間別テーブル＝ヒートマップ）は必ず描画する。
+    // 一時的な失敗（Chart.jsのcanvas再利用エラー等）が全体を空白のまま固めるのを防ぎ、次のpollで自己修復。
+    function renderCharts(data) {
+      try { renderTodayChart(data.today); } catch (e) { console.error('renderTodayChart', e); }
+      var monthAxisMax;
+      // 週グラフのY軸上限は月グラフに合わせる（月を先に計算し、その上限を週に流用）
+      try { monthAxisMax = renderPeriodChart('chartMonth', data.month, '月間 (kWh/日)'); } catch (e) { console.error('renderMonth', e); }
+      try { renderPeriodChart('chartWeek', data.week, '週間 (kWh/日)', monthAxisMax); } catch (e) { console.error('renderWeek', e); }
+      try { renderTable('tbl-ytdy', data.tables.ytdy, '前日'); } catch (e) { console.error('table ytdy', e); }
+      try { renderTable('tbl-avg7', data.tables.avg7, '週平均'); } catch (e) { console.error('table avg7', e); }
+      try { renderTable('tbl-avg30', data.tables.avg30, '月平均'); } catch (e) { console.error('table avg30', e); }
+    }
+
+    function render(data) {
+      updateCurrent(data);
+      renderCharts(data);
+    }
+
+    // 瞬時電力は30秒おきにポーリングして数値だけ更新。
+    // M:CUML（10分おき）が進んだ時だけグラフ/表を再描画する（再描画は重いので頻度を抑える）。
+    var lastCumlCreated = DATA.cuml ? DATA.cuml.created : null;
+
+    function fetchData() {
+      return fetch(EXEC_URL + '?action=data').then(function (r) { return r.json(); });
+    }
+
+    function poll() {
+      fetchData()
+        .then(function (data) {
+          updateCurrent(data);
+          var created = data.cuml ? data.cuml.created : null;
+          if (created !== lastCumlCreated) {
+            lastCumlCreated = created;
+            renderCharts(data);
+          }
+        })
+        .catch(function (err) { console.error(err); });
+    }
+
+    function fmtVal(v) {
+      return (v === null || v === undefined) ? '-' : v.toFixed(1);
+    }
+
+    function round2(v) {
+      return Math.round(v * 100) / 100;
+    }
+
+    // smm3_sub_core2.py の draw_table() 相当：時間別の今日/比較対象/差分（超過=赤・以下=緑）＋合計・比率
+    function renderTable(containerId, table, avgLabel) {
+      var rows = table.rows.map(function (r) {
+        var diffClass = r.diff === null ? '' : (r.diff > 0 ? 'diff-over' : 'diff-under');
+        return '<tr>' +
+          '<td>' + ('0' + r.hour).slice(-2) + ':00</td>' +
+          '<td>' + fmtVal(r.today) + '</td>' +
+          '<td>' + fmtVal(r.avg) + '</td>' +
+          '<td class="' + diffClass + '">' + fmtVal(r.diff) + '</td>' +
+          '</tr>';
+      }).join('');
+
+      var ratioClass = (table.ratio !== null && table.ratio > 100) ? 'diff-over' : 'diff-under';
+      var ratioTxt = table.ratio === null ? 'N/A' : table.ratio + '%';
+
+      document.getElementById(containerId).innerHTML =
+        '<table class="hourly">' +
+        '<thead><tr><th>時</th><th>今日</th><th>' + avgLabel + '</th><th>差</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody>' +
+        '<tfoot><tr><td>合計</td><td>' + fmtVal(table.totalToday) + '</td><td>' + fmtVal(table.totalAvg) +
+        '</td><td class="' + ratioClass + '">' + ratioTxt + '</td></tr></tfoot>' +
+        '</table>';
+    }
+
+    var charts = {};
+
+    // 「前日」「今日」とも、Chart.jsの通常バー描画には頼らず自前で描く。
+    // データセット自体は透明にし、その描画座標（カテゴリの全幅スロット）だけを
+    // 位置の基準として使う。前日＝スロット左揃え、今日＝スロット右揃えで、
+    // どちらも同じ幅（スロット幅×ratio）にする。今日は後から描くので前日より手前になる。
+    // 今日バーが前日バーと重なる部分は、今日バーの外周に背景色の1px線を入れて
+    // 前日バーとの境界を分かりやすくする（手前にあることが分かるように）。
+    // 6時間ごとの区切り線は子機のdraw_graph_1()（range(0,49,12), 色0x303030）と同じ
+    var todayYesterdayPlugin = {
+      id: 'todayYesterday',
+      beforeDatasetsDraw: function (chart) {
+        // Chart.register()したプラグインは、明示的に設定していないチャート（週/月）でも
+        // chart.options.plugins.todayYesterdayが空オブジェクト{}（truthy）にフォールバックする。
+        // !optだけでは弾けないので、このプラグイン専用のプロパティ(yesterday)の有無で判定する
+        var opt = chart.options.plugins && chart.options.plugins.todayYesterday;
+        if (!opt || !opt.yesterday) return;
+        var meta = chart.getDatasetMeta(0);
+        if (!meta.data.length) return;
+        var area = chart.chartArea;
+        var ctx = chart.ctx;
+        ctx.save();
+        ctx.strokeStyle = '#303030';
+        ctx.lineWidth = 1;
+        // 0時は前のスロットが無いのでそのまま左端、6/12/18時は「前のスロットの今日バー右端」と
+        // 「このスロットの前日バー左端」の中央（＝スロット間の隙間の中央）に置く
+        [0, 12, 24, 36].forEach(function (idx) {
+          var slot = meta.data[idx].getProps(['x', 'width'], true);
+          var slotLeft = slot.x - slot.width / 2;
+          var x = slotLeft;
+          if (idx > 0) {
+            var prevSlot = meta.data[idx - 1].getProps(['x', 'width'], true);
+            var prevRight = prevSlot.x + prevSlot.width / 2;
+            x = (prevRight + slotLeft) / 2;
+          }
+          ctx.beginPath();
+          ctx.moveTo(x, area.top);
+          ctx.lineTo(x, area.bottom);
+          ctx.stroke();
+        });
+        var lastSlot = meta.data[meta.data.length - 1].getProps(['x', 'width'], true);
+        var endX = lastSlot.x + lastSlot.width / 2; // 24:00の境界（最終スロットの右端）
+        ctx.beginPath();
+        ctx.moveTo(endX, area.top);
+        ctx.lineTo(endX, area.bottom);
+        ctx.stroke();
+        ctx.restore();
+      },
+      afterDatasetsDraw: function (chart) {
+        // Chart.register()したプラグインは、明示的に設定していないチャート（週/月）でも
+        // chart.options.plugins.todayYesterdayが空オブジェクト{}（truthy）にフォールバックする。
+        // !optだけでは弾けないので、このプラグイン専用のプロパティ(yesterday)の有無で判定する
+        var opt = chart.options.plugins && chart.options.plugins.todayYesterday;
+        if (!opt || !opt.yesterday) return;
+        var meta = chart.getDatasetMeta(0);
+        var ctx = chart.ctx;
+
+        function drawBar(slotLeft, slotRight, width, alignRight, value, color, shadow) {
+          if (value == null) return;
+          var x = alignRight ? slotRight - width : slotLeft;
+          var topY = chart.scales.y.getPixelForValue(value);
+          var bar = meta.data[i].getProps(['base'], true);
+          var h = bar.base - topY;
+          if (shadow) {
+            // 影バーを左・上に少しずらして先に描き、その上に本体を描く（strokeRectは
+            // retinaでアンチエイリアスが乗って汚くなるため使わない）。上にずらした分、
+            // 下端がベースラインより上で切れてしまうので、高さをずらし量分だけ伸ばして底を揃える
+            var offset = 0.5;
+            ctx.fillStyle = '#111';
+            ctx.fillRect(x - offset, topY - offset, width, h + offset);
+          }
+          ctx.fillStyle = color;
+          ctx.fillRect(x, topY, width, h);
+        }
+
+        // 当日バー：前日表示オン時は前日を超えた分を赤(deltaColor)で積み上げる。
+        // オフ時は前日との比較自体を行わず、当日値をそのまま単色で描く
+        function drawTodayBar(slotLeft, slotRight, width, todayVal, yesterdayVal) {
+          if (todayVal == null) return;
+          var x = slotRight - width;
+          var topY = chart.scales.y.getPixelForValue(todayVal);
+          var bar = meta.data[i].getProps(['base'], true);
+          var offset = 0.5;
+          ctx.fillStyle = '#111';
+          ctx.fillRect(x - offset, topY - offset, width, (bar.base - topY) + offset);
+
+          var splitVal = (opt.showYesterday && opt.showExcess && yesterdayVal != null && todayVal > yesterdayVal)
+            ? yesterdayVal : todayVal;
+          var splitY = chart.scales.y.getPixelForValue(splitVal);
+          ctx.fillStyle = opt.todayColor;
+          ctx.fillRect(x, splitY, width, bar.base - splitY);
+          if (splitVal < todayVal) {
+            ctx.fillStyle = opt.deltaColor;
+            ctx.fillRect(x, topY, width, splitY - topY);
+          }
+        }
+
+        for (var i = 0; i < meta.data.length; i++) {
+          var slot = meta.data[i].getProps(['x', 'width'], true);
+          var slotLeft = slot.x - slot.width / 2;
+          var slotRight = slot.x + slot.width / 2;
+          var width = slot.width * opt.ratio;
+          if (opt.showYesterday) {
+            drawBar(slotLeft, slotRight, width, false, opt.yesterday[i], opt.yesterdayColor, false);
+          }
+          // 今日が0は「まだ計測されていない（未来の時間帯）」なので高さ0のバーを描かない
+          drawTodayBar(slotLeft, slotRight, width, opt.today[i] || null, opt.yesterday[i]);
+        }
+      }
+    };
+    Chart.register(todayYesterdayPlugin);
+
+    var showYesterday = true;
+    var showExcess = true;
+    var lastTodayData = null;
+    var toggleExcessEl = document.getElementById('toggleExcess');
+    document.getElementById('toggleYesterday').addEventListener('change', function (e) {
+      showYesterday = e.target.checked;
+      toggleExcessEl.disabled = !showYesterday;
+      document.getElementById('toggleExcessLabel').classList.toggle('disabled', !showYesterday);
+      if (lastTodayData) renderTodayChart(lastTodayData);
+    });
+    toggleExcessEl.addEventListener('change', function (e) {
+      showExcess = e.target.checked;
+      if (lastTodayData) renderTodayChart(lastTodayData);
+    });
+
+    function renderTodayChart(today) {
+      lastTodayData = today;
+      var labels = [];
+      for (var i = 0; i < 48; i++) {
+        var h = Math.floor(i / 2), m = (i % 2 === 0) ? '00' : '30';
+        labels.push(h + ':' + m);
+      }
+      // Y軸の高さは「今日と前日の両方」の最大値で決める。今日のバーは自前プラグイン描画で
+      // Chart.jsのデータセットに含まれない（軸自動スケールの対象外）ため、今日がピークを
+      // 超えるとバーが突き抜ける。suggestedMaxで両方を必ず収める。
+      var _allVals = [];
+      for (var vi = 0; vi < 48; vi++) {
+        if (today.today[vi] != null) _allVals.push(today.today[vi]);
+        if (today.yesterday[vi] != null) _allVals.push(today.yesterday[vi]);
+      }
+      var todayAxisMax = _allVals.length ? Math.max.apply(null, _allVals) : undefined;
+      var _exToday = Chart.getChart('chartToday'); if (_exToday) _exToday.destroy();  // canvasに残った旧チャートを確実に破棄（再利用エラー防止）
+      charts.today = new Chart(document.getElementById('chartToday'), {
+        type: 'bar',
+        data: {
+          labels: labels,
+          // 表示はプラグイン側の自前描画で行うため、ここは透明にして
+          // カテゴリ幅(スロット位置)の基準としてだけ使う
+          datasets: [
+            { label: '前日', data: today.yesterday, backgroundColor: 'transparent', barPercentage: 1, categoryPercentage: 0.8 }
+          ]
+        },
+        options: {
+          animation: false, // 30秒おきのポーリングでdestroy+再生成するため、毎回の伸びるアニメは不要
+          plugins: {
+            legend: { display: false },
+            todayYesterday: {
+              yesterday: today.yesterday, yesterdayColor: '#24293a',
+              today: today.today, todayColor: '#195f90', deltaColor: '#9c4a45',
+              showYesterday: showYesterday, showExcess: showExcess,
+              ratio: 2 / 3
+            }
+          },
+          scales: {
+            x: { ticks: { color: '#888', maxTicksLimit: 8 } },
+            // データ自体が小数点1桁精度(round2のtoday/yesterdayはkWh)なので、
+            // 軸ラベルもそれより細かい0.05刻みなどにはしない
+            y: { suggestedMax: todayAxisMax, ticks: { color: '#888', stepSize: 0.1 }, title: { display: true, text: 'kWh / 30分', color: '#888' } }
+          }
+        }
+      });
+    }
+
+    // 現在時刻（今日の部分集計）を示す水平の基準線。子機のdraw_graph()が今日の現在値の位置に
+    // 縦線を引いて全バーと比較できるようにしているのと同じ役割（軸が違うのでこちらは水平線）。
+    // 線の色は今日バー本体と同じ（呼び出し側でtodayColorを渡す）。
+    // chartArea.left/rightはカテゴリ軸の半枠分の余白を含むため、そこを使うと両端の
+    // バー（平均・今日）の外側に余白がはみ出して見える。実際のバー要素の座標を使い、
+    // 先頭バーの左端〜末尾バーの右端にぴったり合わせる
+    var todayLinePlugin = {
+      id: 'todayLine',
+      afterDraw: function (chart) {
+        var opt = chart.options.plugins && chart.options.plugins.todayLine;
+        if (!opt || opt.value == null) return;
+        var meta = chart.getDatasetMeta(0);
+        if (!meta.data.length) return;
+        var first = meta.data[0].getProps(['x', 'width'], true);
+        var last = meta.data[meta.data.length - 1].getProps(['x', 'width'], true);
+        var leftX = first.x - first.width / 2;
+        var rightX = last.x + last.width / 2;
+        var lineWidth = 1;
+        // strokeは中心線なので、太さの半分が上にはみ出る。バー上端より上に出ないよう半分だけ下げる
+        var y = chart.scales.y.getPixelForValue(opt.value) + lineWidth / 2;
+        var ctx = chart.ctx;
+        ctx.save();
+        ctx.strokeStyle = opt.color || '#ff8000';
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = lineWidth;
+        ctx.beginPath();
+        ctx.moveTo(leftX, y);
+        ctx.lineTo(rightX, y);
+        ctx.stroke();
+        ctx.restore();
+      }
+    };
+    Chart.register(todayLinePlugin);
+
+    // 月グラフ専用：7日ごとの区切り線（子機のdraw_graph() draw_period==30、
+    // range(22,200,44)＝週境界の横線と同じ役割。子機は「今日に近い側から7日ずつ」
+    // 数えるので、余りが出る側（最も古い側）に半端なグループが来る）
+    var periodDividerPlugin = {
+      id: 'periodDivider',
+      beforeDatasetsDraw: function (chart) {
+        var opt = chart.options.plugins && chart.options.plugins.periodDivider;
+        if (!opt || !opt.boundaries) return;
+        var meta = chart.getDatasetMeta(0);
+        if (!meta.data.length) return;
+        var area = chart.chartArea;
+        var ctx = chart.ctx;
+        ctx.save();
+        ctx.strokeStyle = '#303030';
+        ctx.lineWidth = 1;
+        opt.boundaries.forEach(function (rightIdx) {
+          if (rightIdx <= 0 || rightIdx >= meta.data.length) return;
+          var left = meta.data[rightIdx - 1].getProps(['x', 'width'], true);
+          var right = meta.data[rightIdx].getProps(['x', 'width'], true);
+          var x = ((left.x + left.width / 2) + (right.x - right.width / 2)) / 2;
+          ctx.beginPath();
+          ctx.moveTo(x, area.top);
+          ctx.lineTo(x, area.bottom);
+          ctx.stroke();
+        });
+        ctx.restore();
+      }
+    };
+    Chart.register(periodDividerPlugin);
+
+    // 子機のdraw_graph()と同じ並び（左右反転し「今日」を右端に）：
+    // [平均, D-N(最も古い), ... D-1(直近), 今日]
+    // 各バーは「現在時刻までの部分集計(sub・明色)」+「終日合計との残り(total-sub・暗色)」の
+    // 積み上げで、子機の「終日バーに現在値バーを重ねる」表現をstacked barで再現する。
+    // 今日は終日合計が無いのでsubのみ（残りは常に0）。
+    // 現在時刻位置の基準線(todayLine)は今日のsub値を全バーに重ねて表示する
+    function renderPeriodChart(id, period, label, forceMax) {
+      var daysAsc = period.days.slice().reverse(); // D-N(古い)→D-1(直近)の順に並べ直す
+      var labels = ['平均'].concat(daysAsc.map(function (d) { return d.date; })).concat(['今日']);
+
+      // 子機のdraw_graph()と同じ：今日が平均(sub基準)を超えていれば赤、以下なら緑
+      var todayColor = (period.today != null && period.avgSub != null && period.today > period.avgSub)
+        ? '#d00000' : '#00d000';
+
+      var subColors = ['#0000a0'].concat(daysAsc.map(function () { return '#195f90'; })).concat([todayColor]);
+      var remColor = '#0c3650';
+
+      var subData = [period.avgSub].concat(daysAsc.map(function (d) { return d.sub; })).concat([period.today]);
+      var remData = [
+        (period.avgTotal != null && period.avgSub != null) ? round2(period.avgTotal - period.avgSub) : null
+      ].concat(daysAsc.map(function (d) {
+        return (d.total != null && d.sub != null) ? round2(d.total - d.sub) : null;
+      })).concat([0]); // 今日は終日合計が無いので残りは常に0
+
+      // 7日ごとの区切り線（今日に近い側から数えるので、余りは最も古い側に出る）。
+      // daysAscはオールド→新しい順、カテゴリ配列は[平均]+daysAsc+[今日]なのでcatIdx=arrIdx+1
+      var weekBoundaries = [];
+      var firstGroupLen = daysAsc.length % 7 || 7;
+      for (var b = firstGroupLen; b < daysAsc.length; b += 7) {
+        weekBoundaries.push(b + 1); // +1は[平均]分のオフセット
+      }
+      // 両端：平均バーと日別バーの間、日別バーと今日バーの間にも区切り線
+      weekBoundaries.unshift(1);
+      weekBoundaries.push(1 + daysAsc.length);
+
+      // バーが軸の天井にぴったり付いて見えるのを避けるため、最大値の1.1倍を上限にする
+      var totals = subData.map(function (s, i) { return (s || 0) + (remData[i] || 0); });
+      var dataMax = Math.max.apply(null, totals.filter(function (v) { return v != null; }).concat([0]));
+      var axisMax = forceMax != null ? forceMax : Math.ceil(dataMax * 1.1);
+
+      var _exPeriod = Chart.getChart(id); if (_exPeriod) _exPeriod.destroy();  // canvasに残った旧チャートを確実に破棄（再利用エラー防止）
+      charts[id] = new Chart(document.getElementById(id), {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [
+            { label: '現在時刻まで', data: subData, backgroundColor: subColors },
+            { label: '終日', data: remData, backgroundColor: remColor }
+          ]
+        },
+        options: {
+          animation: false, // 30秒おきのポーリングでdestroy+再生成するため、毎回の伸びるアニメは不要
+          plugins: {
+            // 凡例はcanvas外のHTML(.chart-toggle)で静的に表示するため、Chart.js内蔵の凡例は使わない
+            legend: { display: false },
+            todayLine: { value: period.today, color: todayColor },
+            periodDivider: { boundaries: weekBoundaries },
+            // データセット1(終日)の実値は「終日までの残り(total - sub)」だが、
+            // ラベルは「終日」なので表示する数値もその日の終日合計(sub + rem)にする
+            tooltip: {
+              callbacks: {
+                label: function (ctx) {
+                  if (ctx.datasetIndex === 1) {
+                    var sub = ctx.chart.data.datasets[0].data[ctx.dataIndex];
+                    var rem = ctx.chart.data.datasets[1].data[ctx.dataIndex];
+                    var total = (sub == null || rem == null) ? null : round2(sub + rem);
+                    return '終日: ' + (total == null ? '-' : total);
+                  }
+                  return ctx.dataset.label + ': ' + ctx.formattedValue;
+                }
+              }
+            }
+          },
+          scales: {
+            x: { stacked: true, ticks: { color: '#888' } },
+            y: {
+              stacked: true, max: axisMax, min: 0,
+              // stepSize指定だけではChart.js側の自動ティック生成と噛み合わず、
+              // 上限付近のラベルが意図せず欠けることがあるため、表示する値を
+              // 0,2,4,...の配列として直接確定させる
+              afterBuildTicks: function (axis) {
+                var ticks = [];
+                for (var v = 0; v <= axisMax; v += 2) ticks.push({ value: v });
+                axis.ticks = ticks;
+              },
+              ticks: { color: '#888' },
+              title: { display: true, text: label, color: '#888' }
+            }
+          }
+        }
+      });
+
+      return axisMax;
+    }
+
+    render(DATA);
+    setInterval(poll, 30000);
+  </script>
+</body>
+</html>

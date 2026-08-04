@@ -1,6 +1,25 @@
 # SMM3 : Smart Meter Monitor v.3
 
-## お知らせ（2024/05/11）
+## お知らせ（2026/08）大型アップデート
+
+- **Webダッシュボード機能を追加**
+- **ATOM S3 子機対応**
+- **親機フリーズ対策の強化**
+
+---
+
+**① Webダッシュボード機能を追加**：スマホ等のブラウザから外出先で電力状況を確認できるダッシュボード（Google Apps Script製）機能を追加しました。ambient データ送信機能は廃止しています。`smm3_main_web.py` をお使いください。詳しくは **[4.ファイル構成]** と **[7.Webダッシュボード]** を参照してください。
+
+**② ATOM S3 子機対応**：128×128の小型ディスプレイ・省メモリ環境向けに最適化しています。`smm3_sub_atoms3.py` をお使いください（別言語：CircuitPython環境です）。
+
+**③ 親機フリーズ対策を強化しました**（`smm3_main_web.py` に同梱）。ハードウォッチドッグ、GAS送信のタイムアウト処理、再起動頻度の記録などが入っています。ダッシュボードを使わない場合でも、`smm3_main_web.py` を使えばこの対策の恩恵があります。
+
+- Webダッシュボード用親機プログラム：`smm3_main_web.py` は、**子機との通信フォーマットは一切変更していません**。従来の子機がそのまま利用できます。
+- 親機プログラム：`smm3_main.py` は、Wi-Fi 接続時の処理のみ変更しました。
+- 子機プログラム：`smm3_sub.py` / `smm3_sub_core2.py` はいずれも無変更です。
+- ambient データ送信を継続する場合は、引き続き `smm3_main.py` をお使い下さい。
+
+---
 - 電気料金計算モジュール内の関数が増えると、メモリーを圧迫して不具合が出るために、電力会社別にモジュールを分割しました。 calc_charge フォルダー内のモジュールを、calc_charge.py にリネームしてお使いください。また、中部電力スマートライフプランの **電気料金計算関数** に誤りがあったため修正しました。
 
 - スマートメーターの機種によっては使用電力量の履歴データ保持期間が短く、検針日からの電気料金等の計算ができません。そのようなスマートメーターに対応した、**liteバージョン** を追加しました。親機、子機とも、lite フォルダー内のメインプログラムをお使いください。ファイル名のリネームは不要です。
@@ -85,6 +104,7 @@
 - 親機：M5StickC Plus --> [スイッチサイエンス](https://www.switch-science.com/products/6470/)
 - 子機：M5Stack Basic --> [スイッチサイエンス](https://www.switch-science.com/products/9010/)  
 - 子機：M5Stack Core2 --> [スイッチサイエンス](https://www.switch-science.com/products/9349/)  
+- 子機：M5Stack ATOM S3（小型・省メモリ向け、CircuitPython版）  
 - BP35A1 モジュール --> [チップワンストップ](https://www.chip1stop.com/view/searchResult/SearchResultTop?classCd=&did=&cid=netcompo&keyword=BP35A1&utm_source=netcompo&utm_medium=buyNow)
 - Wi-SUN HAT --> [スイッチサイエンス](https://www.switch-science.com/products/7612/)
 
@@ -104,11 +124,15 @@ Ambient でアカウントを作成し、チャネルを作成。チャネルID�
 ## 4. ファイル構成
 
 スマートメーターの履歴保持期間によって通常バージョンか、liteバージョンをお選びください。まずは通常バージョンを試して、30日間グラフが途中までしか描かれない場合は履歴保持期間が短いメーターなので、liteバージョンを使ってください。
+
+親機は、Webダッシュボード（外出先からスマホ等で確認）を使うかどうかで `smm3_main.py` / `smm3_main_web.py` のどちらかを選んでください。子機は、Basic/Core2（下記）と ATOM S3（さらに下）から使用機器に合わせて選んでください。
 ```text
 ■■ 親機（main)：M5StickC Plus + Wi-SUN HAT(with BP35A1 module) ■■
 
 /apps/
   +- smm3_main.py (親機メインプログラム)
+  or
+  +- smm3_main_web.py (親機メインプログラム Webダッシュボード対応版 ※後述)
   or
   +- smm3-lite_main.py (親機メインプログラム liteバージョン)
 
@@ -120,7 +144,17 @@ Ambient でアカウントを作成し、チャネルを作成。チャネルID�
   +- ambient.py (オプション：別途準備)
   ===== 以下のファイルはGSSによる設定を行わない場合のみ使用 =====
   +- api_config.json (オプション：設定用GoogleスプレッドシートのAPI情報)
-  +- config_main.json (オプション：親機設定ファイル)
+  +- config_main.json (オプション：親機設定ファイル。smm3_main_web.py を使う場合は WEB_GAS_URL も設定。config_files/config_main.json のサンプル参照)
+```
+
+`smm3_main_web.py` を使う場合は、加えて以下が必要です（**[7.Webダッシュボード]** 参照）。
+```text
+■■ Webダッシュボード（オプション、smm3_main_web.py を使う場合のみ） ■■
+
+gas_dashboard/
+  +- Code.js / History.js / Dashboard.html / appsscript.json
+  （Google Apps Script のプロジェクトへコピーしてご自身のGoogleアカウントでデプロイ。
+    発行された Web アプリ URL を config_main.json の WEB_GAS_URL に設定してください。）
 ```
 
 ```text
@@ -143,6 +177,24 @@ Ambient でアカウントを作成し、チャネルを作成。チャネルID�
   +- api_config.json (オプション：設定用GoogleスプレッドシートのAPI情報)
   +- config_sub.json (オプション：子機設定ファイル)
 ```
+
+```text
+■■ 子機(sub)：M5Stack ATOM S3 ■■
+※ CircuitPython で動作します（Basic/Core2のUIFlow MicroPythonとは別環境）。
+※ CircuitPython 9.2.9系での動作を確認しています。10系は動作不良を確認したため非推奨です。
+※ 白紙のATOM S3にCircuitPython自体を書き込むところからの手順は [docs/atoms3_setup.md](docs/atoms3_setup.md) 参照。
+※ 128×128の小型ディスプレイ・省メモリ機向けに最適化した専用プログラムです。
+
+/Volumes/CIRCUITPY/（ATOM S3をUSB接続すると現れるドライブの直下）
+  +- code.py (= smm3_sub_atoms3.py をリネームしたもの)
+  +- settings.toml (smm3_sub_atoms3.settings.toml.template を元に作成、空でも可)
+  +- fonts/
+      +- DSEG7Classic-Bold-32.bdf
+      +- Arial-Bold-18.bdf
+      +- Arial-Bold-12.bdf
+      （fonts/README.md 参照。circup install adafruit_display_text adafruit_bitmap_font adafruit_ticks も必要）
+```
+
 同梱の _config_main.json, _api_config.json は、必要最低限の設定値（それぞれ、Bルートのアカウント、設定用Googleスプレッドシート（設定用GSS）のAPI情報）のみを記載したものです。アンダーバーを削除してお使いください。記載のない設定値はプログラム内の初期値が使用されます。（添付の設定用ファイルの各項目の値とプログラム内の初期値は同じです。）
 
 #### モジュールのダウンロードはこちらから
@@ -154,7 +206,8 @@ Ambient でアカウントを作成し、チャネルを作成。チャネルID�
 
 Step-1. [設定用Googleスプレッドシート（設定用GSS）の準備とGoogle Sheets APIの取得（SMM_config）](https://docs.google.com/spreadsheets/d/1qYsY8ZOpj6FxqoebCQnvBFYSL8rCK7r_A7R3m9bF7MY/edit#gid=2004069989)  
 Step-2. [設定用GSSのAPI設定読み込み（SMM_API_config）](https://docs.google.com/spreadsheets/d/1MmbDpG4GTfwRiHsFgsJ89XaIqkVF537lReL4glnOHuc/edit#gid=276533579)  
-　※ それぞれリンク先の説明を参照してください。
+　※ それぞれリンク先の説明を参照してください。  
+Step-3.（`smm3_main_web.py` を使う場合のみ）Webダッシュボード（Google Apps Script）をデプロイし、発行されたURLを設定してください。**[7.Webダッシュボード]** 参照。
 
 ## 6. ボタンの説明
 
@@ -173,9 +226,20 @@ Step-2. [設定用GSSのAPI設定読み込み（SMM_API_config）](https://docs.
 * Bボタン長押し：オートローテーション on/off
 * Cボタン長押し：履歴データ再取得
 
+## 7. Webダッシュボード
+
+`smm3_main_web.py`（親機）を使うと、瞬時電力・積算電力量・電気料金のデータを [Google Apps Script](https://script.google.com/) 製のダッシュボードへ送信し、外出先からもスマホ等のブラウザで確認できます。子機と同様、今日／週間／月間の比較グラフ・時間別表示を見られます。
+
+セットアップ手順（GASプロジェクトの作成からデプロイ、favicon対応の任意手順まで）は
+**[gas_dashboard/README.md](gas_dashboard/README.md)** にまとめました。
+
+閲覧用URLの扱いに関する注意点（第三者に見えてしまう設定であること）も上記READMEに記載しています。
+
 ## その他
 
 **[GoogleスプレッドシートのReademe](https://docs.google.com/spreadsheets/d/1qYsY8ZOpj6FxqoebCQnvBFYSL8rCK7r_A7R3m9bF7MY/edit#gid=158599453)** に、もう少し細かい情報を書き記しているので、参考にしてください。
+
+内部構成・設計判断の詳細（通信プロトコル、フリーズ対策の設計など）は [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) にまとめています。
 
 ## お知らせ履歴
 M5Stack Core2 に対応する子機用プログラムを追加しました。Basic用とCore2用、それぞれ使用機器に合わせてインストールしてください。
