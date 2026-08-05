@@ -1,0 +1,6 @@
+# netlify_shell/ はGASプロジェクトの一部ではなく、Netlifyに置く静的ページのテンプレート。
+# 除外しないと index.html がGAS側のHTMLファイルとして取り込まれてしまう。
+netlify_shell/**
+
+# ドキュメント類もGASには不要
+README.md

@@ -28,6 +28,8 @@
       border: none; font-size: 21px;
     }
     .tabs button.active { background: #1f77b4; color: #fff; }
+    /* 設定タブだけは他4つと違い内容が固定幅でよいので、flexで伸ばさず狭いままにする */
+    .tabs button.gear { flex: 0 0 auto; padding: 14px 20px; font-size: 20px; }
     .page { display: none; padding: 16px; }
     .page.active { display: block; }
     .watt {
@@ -38,6 +40,9 @@
     .unit { font-size: 35px; color: #888; }
     .amp { display: flex; align-items: baseline; white-space: nowrap; font-size: 48px; font-weight: bold; color: #1f77b4; margin-left: 18px; }
     .amp .unit { font-size: 26px; }
+    /* 警告アンペア超過。親機(smm3_main_web.py)のcolor3=colormap[3]=tab:redと同じ色にして実機と揃える。
+       .mutedより先に書くのは、同じ詳細度なら後勝ちのため＝メーター途絶中はグレー(muted)を優先させる */
+    #watt.warn, .amp.warn { color: #d62728; }
     #watt.muted, .amp.muted { color: #555; }
     .sub { text-align: center; color: #888; font-size: 26px; margin-top: 4px; }
     .sub.updated { font-size: 15.6px; }
@@ -77,6 +82,26 @@
     table.hourly .diff-over { color: #d00000; }
     table.hourly .diff-under { color: #00d000; }
     table.hourly tfoot td { border-top: 1px solid #303030; font-weight: bold; color: #fff; padding-top: 8px; }
+    /* 設定ページ：設定用GSSの「項目名／値／項目の説明」の並びに倣う */
+    .set-sec {
+      margin: 30px 0 10px; padding-bottom: 6px; color: #1f77b4;
+      font-size: 15px; font-weight: bold; border-bottom: 1px solid #303030;
+    }
+    .set-row { margin-bottom: 22px; }
+    .set-label { display: block; font-size: 17px; margin-bottom: 6px; }
+    .set-input {
+      width: 100%; padding: 10px; font-size: 18px;
+      background: #1a1a1a; color: #eee; border: 1px solid #444; border-radius: 4px;
+    }
+    .set-static { font-size: 18px; color: #aaa; padding: 4px 0; }
+    .set-desc { font-size: 13px; color: #888; margin-top: 6px; line-height: 1.6; }
+    .set-check { display: flex; align-items: center; gap: 10px; font-size: 17px; }
+    .set-check input { width: 20px; height: 20px; accent-color: #1f77b4; }
+    .set-save {
+      width: 100%; padding: 14px; font-size: 18px; margin-top: 8px;
+      background: #1f77b4; color: #fff; border: none; border-radius: 4px;
+    }
+    .set-msg { text-align: center; font-size: 14px; margin-top: 12px; min-height: 20px; }
   </style>
 </head>
 <body>
@@ -86,6 +111,7 @@
     <button data-page="p-today">今日</button>
     <button data-page="p-week">週</button>
     <button data-page="p-month">月</button>
+    <button class="gear" data-page="p-settings" title="設定" aria-label="設定">&#9881;</button>
   </div>
 
   <div id="p-simple" class="page active">
@@ -129,6 +155,42 @@
     <div id="tbl-avg30"></div>
   </div>
 
+  <div id="p-settings" class="page">
+    <div class="set-row">
+      <label class="set-label" for="setWarnAmp">警告アンペア（A）</label>
+      <input class="set-input" id="setWarnAmp" type="number" min="1" step="1" inputmode="numeric">
+      <div class="set-desc">このアンペア数以上になると、瞬時画面の数値が赤くなります。ここでの変更はこのダッシュボードにだけ効きます（親機・子機の警告は設定用スプレッドシート側の値で動きます）。</div>
+    </div>
+
+    <div class="set-row">
+      <div class="set-label">契約アンペア（A）</div>
+      <div class="set-static" id="setContractAmp">-</div>
+      <div class="set-desc">電力会社との契約アンペアです。親機から自動で受け取っているため、ここでは変更できません。変更は設定用スプレッドシートから行ってください。</div>
+    </div>
+
+    <div class="set-sec">メール通知</div>
+
+    <div class="set-row">
+      <label class="set-label" for="setAlertEmail">通知先アドレス</label>
+      <input class="set-input" id="setAlertEmail" type="email" inputmode="email" placeholder="example@gmail.com">
+      <div class="set-desc">親機からのデータが途絶えたときの通知先です。空欄なら通知しません。</div>
+    </div>
+
+    <div class="set-row">
+      <label class="set-check"><input type="checkbox" id="setAlertEnabled">通知を有効にする</label>
+      <div class="set-desc">5分ごとに状態を確認し、異常を検知したときと復帰したときに1通ずつ送ります。</div>
+    </div>
+
+    <div class="set-row">
+      <div class="set-label">監視の状態</div>
+      <div class="set-static" id="setTriggerState">-</div>
+      <div class="set-desc" id="setTriggerHelp"></div>
+    </div>
+
+    <button class="set-save" id="setSave">保存</button>
+    <div class="set-msg" id="setMsg"></div>
+  </div>
+
   <script>
     var DATA = <?!= JSON.stringify(data) ?>;
     // GASのWebアプリURLはscript.googleusercontent.comへリダイレクトされるため、
@@ -160,6 +222,62 @@
       return s ? s.slice(5, 10) : s;
     }
 
+    // ---- 設定 ----
+    var SETTINGS = DATA.settings || null;
+
+    // 毎ポーリングで呼ばれる。入力欄への反映は設定ページを開いていない時だけ行い、
+    // 編集途中の値をポーリングが上書きしてしまうのを防ぐ（表示専用の項目は常に最新化する）。
+    function applySettings(data) {
+      var s = data && data.settings;
+      if (!s) return;
+      SETTINGS = s;
+
+      if (!document.getElementById('p-settings').classList.contains('active')) {
+        document.getElementById('setWarnAmp').value = s.warnAmp;
+        document.getElementById('setAlertEmail').value = s.alertEmail || '';
+        document.getElementById('setAlertEnabled').checked = !!s.alertEnabled;
+      }
+
+      document.getElementById('setContractAmp').textContent =
+        (s.contractAmp === null || s.contractAmp === undefined)
+          ? '親機からの受信待ちです' : s.contractAmp + ' A';
+
+      var st = document.getElementById('setTriggerState');
+      var help = document.getElementById('setTriggerHelp');
+      if (s.triggerAlive) {
+        st.textContent = '稼働中';
+        st.style.color = '#2ca02c';
+        help.textContent = '最終確認: ' + fmtTime(s.lastCheckAt);
+      } else {
+        st.textContent = '停止中';
+        st.style.color = '#d62728';
+        help.textContent = '通知を受け取るには、Apps Scriptエディタで installHealthTrigger 関数を一度だけ実行してください（手順は gas_dashboard/README.md 参照）。実行後、5分ほどで「稼働中」に変わります。';
+      }
+    }
+
+    document.getElementById('setSave').addEventListener('click', function () {
+      var msg = document.getElementById('setMsg');
+      var q = '?action=saveSettings'
+        + '&warnAmp=' + encodeURIComponent(document.getElementById('setWarnAmp').value)
+        + '&alertEmail=' + encodeURIComponent(document.getElementById('setAlertEmail').value)
+        + '&alertEnabled=' + (document.getElementById('setAlertEnabled').checked ? '1' : '0');
+      msg.style.color = '#888';
+      msg.textContent = '保存中…';
+      fetch(EXEC_URL + q)
+        .then(function (r) { return r.json(); })
+        .then(function (s) {
+          SETTINGS = s;
+          msg.style.color = '#2ca02c';
+          msg.textContent = '保存しました';
+          setTimeout(function () { msg.textContent = ''; }, 3000);
+        })
+        .catch(function (err) {
+          msg.style.color = '#d62728';
+          msg.textContent = '保存に失敗しました';
+          console.error(err);
+        });
+    });
+
     // 状態監視：health.status が stale なら画面全体を警告色にし、バナーで経過時間を表示
     function applyHealth(data) {
       var h = data && data.health;
@@ -178,20 +296,30 @@
 
     function updateCurrent(data) {
       applyHealth(data);
+      applySettings(data);
       if (data.current) {
         document.getElementById('watt').textContent = data.current.watt;
         document.getElementById('watt').classList.toggle('muted', !!data.current.muted);
         document.getElementById('amp').textContent =
           (data.current.amp === null || data.current.amp === undefined) ? '-' : data.current.amp;
         document.getElementById('ampWrap').classList.toggle('muted', !!data.current.muted);
+        // 警告アンペア超過（親機の ampere_limit_over と同じ >= 判定）。メーター途絶中(muted)は
+        // 値自体が古いので警告を出さない
+        var amp = data.current.amp;
+        var over = !data.current.muted && SETTINGS && SETTINGS.warnAmp
+          && amp !== null && amp !== undefined && amp >= SETTINGS.warnAmp;
+        document.getElementById('watt').classList.toggle('warn', !!over);
+        document.getElementById('ampWrap').classList.toggle('warn', !!over);
         var updatedLabel = '更新: ' + fmtTime(data.current.updatedAt);
         if (data.current.muted) updatedLabel += '（メーター通信途絶中）';
         document.getElementById('wattUpdated').textContent = updatedLabel;
       } else {
         document.getElementById('watt').textContent = '-';
         document.getElementById('watt').classList.remove('muted');
+        document.getElementById('watt').classList.remove('warn');
         document.getElementById('amp').textContent = '-';
         document.getElementById('ampWrap').classList.remove('muted');
+        document.getElementById('ampWrap').classList.remove('warn');
         document.getElementById('wattUpdated').textContent = 'データ未取得です';
       }
 

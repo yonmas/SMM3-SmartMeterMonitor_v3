@@ -607,6 +607,10 @@ def send_web_cuml(collect, created, e_energy, monthly_e_energy, charge):
             'e_energy': e_energy,
             'monthly_e_energy': monthly_e_energy,
             'charge': charge,
+            # 契約アンペアの正本は設定用GSS。GAS側は設定ページでの表示にのみ使う（編集不可）。
+            # 10分毎のcumlに相乗りさせるのは、inst(30秒毎)を太らせず、設定変更後も10分以内に
+            # 追従できるため。ESP-NOWの M:CUML 文字列は不変なので子機には影響しない。
+            'contract': config['CONTRACT_AMPERAGE'],
         })
         response = _web_post(payload)
         response.close()

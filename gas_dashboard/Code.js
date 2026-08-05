@@ -1,5 +1,7 @@
 // SMM3 Dashboard - GAS Web App
 // 親機からの M:CUML / M:INST 相当のデータを受け取って表示する。
+// このコードの正本はリポジトリ側（SMM3/gas_dashboard/）。エディタで直接編集すると
+// 次の clasp push で上書きされるため、修正はリポジトリ側で行うこと。
 
 var PROP = PropertiesService.getScriptProperties();
 
@@ -8,10 +10,18 @@ var STALE_SEC = 600;    // この秒数データが途絶えたら「異常(stal
                         // inst=30秒毎/cuml=10分毎なので、単発の再起動(~2-3分)では誤検知しない値
 var ALERT_EMAIL = '';   // 通知先メール。空ならメール送信せずダッシュボード表示のみ。
                         // Script Propertiesの 'alertEmail' でも上書き可（コード変更不要）
+var DEFAULT_WARN_AMP = 30;  // 警告アンペアの初期値。設定用GSSの WARNING_AMPERAGE と同じ既定値だが、
+                            // 以降はダッシュボードの設定ページで独立して変更する（シートとは同期しない）
 
 function doGet(e) {
   if (e.parameter.action === 'data') {
     return ContentService.createTextOutput(JSON.stringify(getDashboardData()))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  // 設定の保存。既存の action=data と同じGETの流儀に揃える（Netlifyのiframe越しでも確実に通る）。
+  // URLを知っていれば誰でも変更できるが、変えられて困る値が無いため認証は設けていない。
+  if (e.parameter.action === 'saveSettings') {
+    return ContentService.createTextOutput(JSON.stringify(saveSettings(e.parameter)))
       .setMimeType(ContentService.MimeType.JSON);
   }
   var tmpl = HtmlService.createTemplateFromFile('Dashboard');
@@ -37,6 +47,11 @@ function doPost(e) {
     }));
   } else if (body.type === 'cuml') {
     PROP.setProperty('cuml', JSON.stringify(body));
+    // 契約アンペアの正本は設定用GSS（CONTRACT_AMPERAGE）。親機が起動時に読んだ値をcumlに同梱して
+    // くるので、届いた分だけキャッシュして設定ページに表示する（GAS側では編集しない）。
+    if (body.contract !== undefined && body.contract !== null && body.contract !== '') {
+      PROP.setProperty('contractAmp', String(body.contract));
+    }
     appendHistory(body.created, body.e_energy);
   } else if (body.type === 'backfill') {
     backfillHistory(body.points);
@@ -64,6 +79,44 @@ function recordBoot(cause) {
   try {
     appendReboot(Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss'), cause, cnt, gapMin);
   } catch (e) {}
+}
+
+// ---- 設定（PropertiesService保存＝家族全員で共通の1組。誰が変えても全員に反映される） ----
+// 警告アンペアとメール通知はGAS内で完結。契約アンペアだけは親機がcumlで送ってくる値の表示専用。
+function getSettings() {
+  var warn = parseFloat(PROP.getProperty('warnAmp'));
+  var contract = parseFloat(PROP.getProperty('contractAmp'));
+  var lastCheck = PROP.getProperty('lastCheckAt');
+  // 監視トリガーの生死を ScriptApp.getProjectTriggers() で調べてはいけない。doGetから呼ぶと
+  // 匿名アクセスに無い権限を要求してダッシュボード全体が落ちる（2026-08-04に実際に発生し復旧）。
+  // 代わりに checkHealth() が5分毎に打刻する lastCheckAt の鮮度で生存を推定する。
+  var triggerAlive = false;
+  if (lastCheck) {
+    triggerAlive = (new Date().getTime() - new Date(lastCheck).getTime()) < 15 * 60 * 1000;
+  }
+  return {
+    warnAmp: isNaN(warn) ? DEFAULT_WARN_AMP : warn,
+    contractAmp: isNaN(contract) ? null : contract,
+    alertEmail: PROP.getProperty('alertEmail') || ALERT_EMAIL || '',
+    alertEnabled: PROP.getProperty('alertEnabled') !== 'off',   // 未設定なら有効
+    triggerAlive: triggerAlive,
+    lastCheckAt: lastCheck || null
+  };
+}
+
+// 送られてきたパラメータのうち、指定されたものだけ更新する（未指定の項目は現状維持）
+function saveSettings(p) {
+  if (p.warnAmp !== undefined && p.warnAmp !== '') {
+    var w = parseFloat(p.warnAmp);
+    if (!isNaN(w) && w > 0) PROP.setProperty('warnAmp', String(w));
+  }
+  if (p.alertEmail !== undefined) {
+    PROP.setProperty('alertEmail', String(p.alertEmail).trim());
+  }
+  if (p.alertEnabled !== undefined) {
+    PROP.setProperty('alertEnabled', p.alertEnabled === '1' ? 'on' : 'off');
+  }
+  return getSettings();
 }
 
 function getDashboardData() {
@@ -105,6 +158,7 @@ function getDashboardData() {
       avg30: buildTable(todayHourly, monthAvgHourly)
     },
     health: getHealth(now),
+    settings: getSettings(),
     reboot: {
       count: parseInt(PROP.getProperty('rebootCount') || '0', 10),
       log: JSON.parse(PROP.getProperty('rebootLog') || '[]')
@@ -132,9 +186,15 @@ function getHealth(now) {
 // 時間トリガ(installHealthTriggerで5分毎に設置)から呼ばれる。状態が変化した時だけ通知。
 // 監視のみ＝検知して知らせるだけ。再起動などの復旧アクションは一切しない。
 function checkHealth() {
+  // トリガーが生きている証跡。設定ページの「監視トリガーの状態」はこの鮮度だけで判定する
+  // （ScriptApp.getProjectTriggers()は匿名アクセスから呼べないため。getSettings()のコメント参照）
+  PROP.setProperty('lastCheckAt', new Date().toISOString());
+
   var h = getHealth(new Date());
   var prev = PROP.getProperty('alertState') || 'ok';
-  var email = PROP.getProperty('alertEmail') || ALERT_EMAIL;
+  // 通知OFFでもalertStateの遷移だけは記録する（ONに戻した直後に過去の異常で誤発報しないため）
+  var enabled = PROP.getProperty('alertEnabled') !== 'off';
+  var email = enabled ? (PROP.getProperty('alertEmail') || ALERT_EMAIL) : '';
 
   if (h.status === 'stale' && prev !== 'stale') {
     if (email) {
