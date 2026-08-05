@@ -93,21 +93,41 @@ function getSettings() {
   var warn = parseFloat(PROP.getProperty('warnAmp'));
   var contract = parseFloat(PROP.getProperty('contractAmp'));
   var lastCheck = PROP.getProperty('lastCheckAt');
-  // 監視トリガーの生死を ScriptApp.getProjectTriggers() で調べてはいけない。doGetから呼ぶと
-  // 匿名アクセスに無い権限を要求してダッシュボード全体が落ちる（2026-08-04に実際に発生し復旧）。
-  // 代わりに checkHealth() が5分毎に打刻する lastCheckAt の鮮度で生存を推定する。
-  var triggerAlive = false;
-  if (lastCheck) {
-    triggerAlive = (new Date().getTime() - new Date(lastCheck).getTime()) < 15 * 60 * 1000;
-  }
   return {
     warnAmp: isNaN(warn) ? DEFAULT_WARN_AMP : warn,
     contractAmp: isNaN(contract) ? null : contract,
     // 通知のON/OFFは別フラグを持たず「アドレスが空かどうか」だけで表す（設定項目を二重にしない）
     alertEmail: PROP.getProperty('alertEmail') || ALERT_EMAIL || '',
-    triggerAlive: triggerAlive,
+    triggerInstalled: PROP.getProperty('triggerInstalled') === '1',
+    triggerError: PROP.getProperty('triggerError') || null,
     lastCheckAt: lastCheck || null
   };
+}
+
+// 通知の実体である「5分毎の時間トリガー」を、通知先アドレスの有無に合わせて自動で設置/削除する。
+// これによりユーザーの操作は「アドレスを入れる＝ON / 空にする＝OFF」だけで完結する。
+// ScriptApp が権限不足で落ちる可能性があるため必ず try/catch で囲み、失敗しても
+// saveSettings 全体（ひいてはダッシュボード）を巻き込まないようにする。失敗の内容は
+// triggerError に残し、設定ページで手動設置を案内する材料にする。
+function syncHealthTrigger(email) {
+  try {
+    var existing = ScriptApp.getProjectTriggers().filter(function (t) {
+      return t.getHandlerFunction() === 'checkHealth';
+    });
+    if (email) {
+      if (existing.length === 0) {
+        ScriptApp.newTrigger('checkHealth').timeBased().everyMinutes(5).create();
+      }
+      PROP.setProperty('triggerInstalled', '1');
+    } else {
+      existing.forEach(function (t) { ScriptApp.deleteTrigger(t); });
+      PROP.deleteProperty('triggerInstalled');
+      PROP.deleteProperty('lastCheckAt');   // 次にONにした時、古い打刻を生存と誤認しないよう消す
+    }
+    PROP.deleteProperty('triggerError');
+  } catch (e) {
+    PROP.setProperty('triggerError', String((e && e.message) || e));
+  }
 }
 
 // 送られてきたパラメータのうち、指定されたものだけ更新する（未指定の項目は現状維持）
@@ -117,7 +137,11 @@ function saveSettings(p) {
     if (!isNaN(w) && w > 0) PROP.setProperty('warnAmp', String(w));
   }
   if (p.alertEmail !== undefined) {
-    PROP.setProperty('alertEmail', String(p.alertEmail).trim());
+    var email = String(p.alertEmail).trim();
+    var before = PROP.getProperty('alertEmail') || '';
+    PROP.setProperty('alertEmail', email);
+    // 空⇔非空が変わった時だけトリガーを触る（毎回ScriptAppを叩かない）
+    if (!!email !== !!before) syncHealthTrigger(email);
   }
   return getSettings();
 }
@@ -234,7 +258,9 @@ function checkHealth() {
   }
 }
 
-// 一度だけ手動実行：5分毎の監視トリガを設置（重複回避のため既存のcheckHealthトリガは削除）
+// 手動設置用のフォールバック。通常は通知先アドレスを入れた時に syncHealthTrigger() が
+// 自動で設置するので実行不要。自動設置が権限等で失敗した場合にエディタから一度だけ実行する。
+// （重複回避のため既存のcheckHealthトリガは削除してから作り直す）
 function installHealthTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'checkHealth') ScriptApp.deleteTrigger(t);

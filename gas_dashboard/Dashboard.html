@@ -241,21 +241,28 @@
           ? '親機からの受信待ちです' : s.contractAmp + ' A';
 
       // 「今このダッシュボードが通知を送れる状態か」を1行で示す。
-      // 通知には (1)5分毎のトリガーが設置済み (2)通知先アドレスあり の両方が要る。
+      // 通常はアドレスを入れた時点で5分毎の定期実行が自動設置されるので、利用者の操作は
+      // アドレスの入力／消去だけでよい。自動設置に失敗した時だけ手動の案内を出す。
       var st = document.getElementById('setNotifyState');
       var help = document.getElementById('setNotifyHelp');
-      if (!s.triggerAlive) {
+      if (!s.alertEmail) {
+        st.textContent = '停止中';
+        st.style.color = '#888';
+        help.textContent = '通知先アドレスを入れると通知が始まります。';
+      } else if (s.triggerError) {
         st.textContent = '停止中';
         st.style.color = '#d62728';
-        help.textContent = '5分ごとに親機の状態を確認する定期実行が、Google側にまだ登録されていません。このままでは通知は送られません。登録は初回だけで済みます（手順は gas_dashboard/README.md）。';
-      } else if (!s.alertEmail) {
-        st.textContent = '停止中';
-        st.style.color = '#d62728';
-        help.textContent = '通知先アドレスが未設定です。';
-      } else {
+        help.textContent = '定期実行の自動設定に失敗しました（' + s.triggerError + '）。gas_dashboard/README.md の手順で手動設定してください。';
+      } else if (s.triggerInstalled) {
         st.textContent = '稼働中';
         st.style.color = '#2ca02c';
-        help.textContent = '最終確認: ' + fmtTime(s.lastCheckAt);
+        help.textContent = s.lastCheckAt
+          ? '最終確認: ' + fmtTime(s.lastCheckAt)
+          : 'まもなく最初の確認が行われます。';
+      } else {
+        st.textContent = '停止中';
+        st.style.color = '#d62728';
+        help.textContent = 'gas_dashboard/README.md の手順で定期実行を設定してください。';
       }
     }
 
