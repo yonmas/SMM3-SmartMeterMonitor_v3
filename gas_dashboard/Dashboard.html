@@ -84,7 +84,7 @@
     table.hourly tfoot td { border-top: 1px solid #303030; font-weight: bold; color: #fff; padding-top: 8px; }
     /* 設定ページ：設定用GSSの「項目名／値／項目の説明」の並びに倣う */
     .set-row { margin-bottom: 22px; }
-    .set-label { display: block; font-size: 17px; margin-bottom: 6px; }
+    .set-label { display: block; font-size: 17px; margin-bottom: 4px; }
     .set-input {
       width: 100%; padding: 10px; font-size: 18px;
       background: #1a1a1a; color: #eee; border: 1px solid #444; border-radius: 4px;
@@ -92,7 +92,10 @@
     /* 数値2桁に全幅は間延びするので絞る */
     .set-input.narrow { width: 6em; }
     .set-static { font-size: 18px; color: #aaa; padding: 4px 0; }
-    .set-desc { font-size: 13px; color: #888; margin-top: 6px; line-height: 1.6; }
+    /* 説明文は見出しの直下（入力欄の上）に置く */
+    .set-desc { font-size: 13px; color: #888; margin: 0 0 8px; line-height: 1.6; }
+    /* 「通知の状態」の補足だけは、状態そのものへの説明なので値の下に置く */
+    #setNotifyHelp { margin: 6px 0 0; }
     .set-test {
       margin-top: 10px; padding: 8px 18px; font-size: 15px;
       background: #222; color: #ccc; border: 1px solid #555; border-radius: 4px;
@@ -154,20 +157,20 @@
   <div id="p-settings" class="page">
     <div class="set-row">
       <label class="set-label" for="setWarnAmp">警告アンペア（A）</label>
-      <input class="set-input narrow" id="setWarnAmp" type="number" min="1" step="1" inputmode="numeric">
       <div class="set-desc">超過時に瞬時画面の数値が赤くなります。</div>
+      <input class="set-input narrow" id="setWarnAmp" type="number" min="1" step="1" inputmode="numeric">
     </div>
 
     <div class="set-row">
       <div class="set-label">契約アンペア（A）</div>
-      <div class="set-static" id="setContractAmp">-</div>
       <div class="set-desc">親機から自動取得。</div>
+      <div class="set-static" id="setContractAmp">-</div>
     </div>
 
     <div class="set-row">
       <label class="set-label" for="setAlertEmail">通知先アドレス</label>
-      <input class="set-input" id="setAlertEmail" type="email" inputmode="email" placeholder="example@gmail.com">
       <div class="set-desc">親機からのデータが途絶えたときに通知します。空欄なら通知しません。</div>
+      <input class="set-input" id="setAlertEmail" type="email" inputmode="email" placeholder="example@gmail.com">
       <button class="set-test" id="setTest">テスト送信</button>
     </div>
 
@@ -244,7 +247,7 @@
       if (!s.triggerAlive) {
         st.textContent = '停止中';
         st.style.color = '#d62728';
-        help.textContent = '初回のみ、Apps Scriptエディタで installHealthTrigger を実行してください（手順は gas_dashboard/README.md）。実行後5分ほどで稼働中に変わります。';
+        help.textContent = '5分ごとに親機の状態を確認する定期実行が、Google側にまだ登録されていません。このままでは通知は送られません。登録は初回だけで済みます（手順は gas_dashboard/README.md）。';
       } else if (!s.alertEmail) {
         st.textContent = '停止中';
         st.style.color = '#d62728';
