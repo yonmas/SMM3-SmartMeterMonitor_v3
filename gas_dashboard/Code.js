@@ -24,6 +24,10 @@ function doGet(e) {
     return ContentService.createTextOutput(JSON.stringify(saveSettings(e.parameter)))
       .setMimeType(ContentService.MimeType.JSON);
   }
+  if (e.parameter.action === 'testMail') {
+    return ContentService.createTextOutput(JSON.stringify(sendTestMail()))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
   var tmpl = HtmlService.createTemplateFromFile('Dashboard');
   tmpl.data = getDashboardData();
   tmpl.execUrl = ScriptApp.getService().getUrl();
@@ -99,8 +103,8 @@ function getSettings() {
   return {
     warnAmp: isNaN(warn) ? DEFAULT_WARN_AMP : warn,
     contractAmp: isNaN(contract) ? null : contract,
+    // 通知のON/OFFは別フラグを持たず「アドレスが空かどうか」だけで表す（設定項目を二重にしない）
     alertEmail: PROP.getProperty('alertEmail') || ALERT_EMAIL || '',
-    alertEnabled: PROP.getProperty('alertEnabled') !== 'off',   // 未設定なら有効
     triggerAlive: triggerAlive,
     lastCheckAt: lastCheck || null
   };
@@ -115,10 +119,26 @@ function saveSettings(p) {
   if (p.alertEmail !== undefined) {
     PROP.setProperty('alertEmail', String(p.alertEmail).trim());
   }
-  if (p.alertEnabled !== undefined) {
-    PROP.setProperty('alertEnabled', p.alertEnabled === '1' ? 'on' : 'off');
-  }
   return getSettings();
+}
+
+// 設定ページの「テスト送信」。通知先が正しいかを、親機が実際に止まるのを待たずに確かめる。
+// MailAppが権限エラーを投げてもこの分岐の中で握り潰し、他のaction（特にaction=data）に
+// 波及させない。ダッシュボード全体を落とさないことを最優先する。
+function sendTestMail() {
+  var email = PROP.getProperty('alertEmail') || ALERT_EMAIL;
+  if (!email) {
+    return { ok: false, error: '通知先アドレスが未設定です' };
+  }
+  try {
+    MailApp.sendEmail(email, '[SMM3] テスト送信',
+      'SMM3ダッシュボードからのテストメールです。\n' +
+      'このメールが届いていれば、通知先の設定は正しく行われています。\n\n' +
+      '実際の通知は、親機からのデータが' + STALE_SEC + '秒以上途絶えたときに送られます。');
+    return { ok: true, to: email };
+  } catch (e) {
+    return { ok: false, error: '送信に失敗しました: ' + e.message };
+  }
 }
 
 function getDashboardData() {
@@ -194,9 +214,9 @@ function checkHealth() {
 
   var h = getHealth(new Date());
   var prev = PROP.getProperty('alertState') || 'ok';
-  // 通知OFFでもalertStateの遷移だけは記録する（ONに戻した直後に過去の異常で誤発報しないため）
-  var enabled = PROP.getProperty('alertEnabled') !== 'off';
-  var email = enabled ? (PROP.getProperty('alertEmail') || ALERT_EMAIL) : '';
+  // アドレスが空＝通知OFF。空でもalertStateの遷移だけは記録する
+  // （アドレスを設定した直後に、過去の異常で誤発報しないため）
+  var email = PROP.getProperty('alertEmail') || ALERT_EMAIL;
 
   if (h.status === 'stale' && prev !== 'stale') {
     if (email) {

@@ -83,23 +83,19 @@
     table.hourly .diff-under { color: #00d000; }
     table.hourly tfoot td { border-top: 1px solid #303030; font-weight: bold; color: #fff; padding-top: 8px; }
     /* 設定ページ：設定用GSSの「項目名／値／項目の説明」の並びに倣う */
-    .set-sec {
-      margin: 30px 0 10px; padding-bottom: 6px; color: #1f77b4;
-      font-size: 15px; font-weight: bold; border-bottom: 1px solid #303030;
-    }
     .set-row { margin-bottom: 22px; }
     .set-label { display: block; font-size: 17px; margin-bottom: 6px; }
     .set-input {
       width: 100%; padding: 10px; font-size: 18px;
       background: #1a1a1a; color: #eee; border: 1px solid #444; border-radius: 4px;
     }
+    /* 数値2桁に全幅は間延びするので絞る */
+    .set-input.narrow { width: 6em; }
     .set-static { font-size: 18px; color: #aaa; padding: 4px 0; }
     .set-desc { font-size: 13px; color: #888; margin-top: 6px; line-height: 1.6; }
-    .set-check { display: flex; align-items: center; gap: 10px; font-size: 17px; }
-    .set-check input { width: 20px; height: 20px; accent-color: #1f77b4; }
-    .set-save {
-      width: 100%; padding: 14px; font-size: 18px; margin-top: 8px;
-      background: #1f77b4; color: #fff; border: none; border-radius: 4px;
+    .set-test {
+      margin-top: 10px; padding: 8px 18px; font-size: 15px;
+      background: #222; color: #ccc; border: 1px solid #555; border-radius: 4px;
     }
     .set-msg { text-align: center; font-size: 14px; margin-top: 12px; min-height: 20px; }
   </style>
@@ -158,36 +154,29 @@
   <div id="p-settings" class="page">
     <div class="set-row">
       <label class="set-label" for="setWarnAmp">警告アンペア（A）</label>
-      <input class="set-input" id="setWarnAmp" type="number" min="1" step="1" inputmode="numeric">
-      <div class="set-desc">このアンペア数以上になると、瞬時画面の数値が赤くなります。ここでの変更はこのダッシュボードにだけ効きます（親機・子機の警告は設定用スプレッドシート側の値で動きます）。</div>
+      <input class="set-input narrow" id="setWarnAmp" type="number" min="1" step="1" inputmode="numeric">
+      <div class="set-desc">超過時に瞬時画面の数値が赤くなります。</div>
     </div>
 
     <div class="set-row">
       <div class="set-label">契約アンペア（A）</div>
       <div class="set-static" id="setContractAmp">-</div>
-      <div class="set-desc">電力会社との契約アンペアです。親機から自動で受け取っているため、ここでは変更できません。変更は設定用スプレッドシートから行ってください。</div>
+      <div class="set-desc">親機から自動取得。</div>
     </div>
-
-    <div class="set-sec">メール通知</div>
 
     <div class="set-row">
       <label class="set-label" for="setAlertEmail">通知先アドレス</label>
       <input class="set-input" id="setAlertEmail" type="email" inputmode="email" placeholder="example@gmail.com">
-      <div class="set-desc">親機からのデータが途絶えたときの通知先です。空欄なら通知しません。</div>
+      <div class="set-desc">親機からのデータが途絶えたときに通知します。空欄なら通知しません。</div>
+      <button class="set-test" id="setTest">テスト送信</button>
     </div>
 
     <div class="set-row">
-      <label class="set-check"><input type="checkbox" id="setAlertEnabled">通知を有効にする</label>
-      <div class="set-desc">5分ごとに状態を確認し、異常を検知したときと復帰したときに1通ずつ送ります。</div>
+      <div class="set-label">通知の状態</div>
+      <div class="set-static" id="setNotifyState">-</div>
+      <div class="set-desc" id="setNotifyHelp"></div>
     </div>
 
-    <div class="set-row">
-      <div class="set-label">監視の状態</div>
-      <div class="set-static" id="setTriggerState">-</div>
-      <div class="set-desc" id="setTriggerHelp"></div>
-    </div>
-
-    <button class="set-save" id="setSave">保存</button>
     <div class="set-msg" id="setMsg"></div>
   </div>
 
@@ -199,6 +188,13 @@
 
     document.querySelectorAll('.tabs button').forEach(function (btn) {
       btn.addEventListener('click', function () {
+        // 設定タブから離れる時、入力欄にフォーカスが残ったままだと change が発火しないので、
+        // ここでも保存を試みる（未変更なら saveSettings 内で何もしない）
+        if (document.getElementById('p-settings').classList.contains('active')
+            && btn.dataset.page !== 'p-settings') {
+          document.activeElement.blur();
+          saveSettings();
+        }
         document.querySelectorAll('.tabs button').forEach(function (b) { b.classList.remove('active'); });
         document.querySelectorAll('.page').forEach(function (p) { p.classList.remove('active'); });
         btn.classList.add('active');
@@ -235,45 +231,90 @@
       if (!document.getElementById('p-settings').classList.contains('active')) {
         document.getElementById('setWarnAmp').value = s.warnAmp;
         document.getElementById('setAlertEmail').value = s.alertEmail || '';
-        document.getElementById('setAlertEnabled').checked = !!s.alertEnabled;
       }
 
       document.getElementById('setContractAmp').textContent =
         (s.contractAmp === null || s.contractAmp === undefined)
           ? '親機からの受信待ちです' : s.contractAmp + ' A';
 
-      var st = document.getElementById('setTriggerState');
-      var help = document.getElementById('setTriggerHelp');
-      if (s.triggerAlive) {
+      // 「今このダッシュボードが通知を送れる状態か」を1行で示す。
+      // 通知には (1)5分毎のトリガーが設置済み (2)通知先アドレスあり の両方が要る。
+      var st = document.getElementById('setNotifyState');
+      var help = document.getElementById('setNotifyHelp');
+      if (!s.triggerAlive) {
+        st.textContent = '停止中';
+        st.style.color = '#d62728';
+        help.textContent = '初回のみ、Apps Scriptエディタで installHealthTrigger を実行してください（手順は gas_dashboard/README.md）。実行後5分ほどで稼働中に変わります。';
+      } else if (!s.alertEmail) {
+        st.textContent = '停止中';
+        st.style.color = '#d62728';
+        help.textContent = '通知先アドレスが未設定です。';
+      } else {
         st.textContent = '稼働中';
         st.style.color = '#2ca02c';
         help.textContent = '最終確認: ' + fmtTime(s.lastCheckAt);
-      } else {
-        st.textContent = '停止中';
-        st.style.color = '#d62728';
-        help.textContent = '通知を受け取るには、Apps Scriptエディタで installHealthTrigger 関数を一度だけ実行してください（手順は gas_dashboard/README.md 参照）。実行後、5分ほどで「稼働中」に変わります。';
       }
     }
 
-    document.getElementById('setSave').addEventListener('click', function () {
+    // 設定は自動保存。保存ボタンは置かず、入力確定時（change＝値を変えて入力欄から離れた時）と、
+    // 設定タブから他タブへ移った時に送る。押し忘れで変更が消えるのを防ぐため。
+    var settingsDirty = false;
+
+    function saveSettings() {
+      if (!settingsDirty) return;
+      settingsDirty = false;
       var msg = document.getElementById('setMsg');
       var q = '?action=saveSettings'
         + '&warnAmp=' + encodeURIComponent(document.getElementById('setWarnAmp').value)
-        + '&alertEmail=' + encodeURIComponent(document.getElementById('setAlertEmail').value)
-        + '&alertEnabled=' + (document.getElementById('setAlertEnabled').checked ? '1' : '0');
+        + '&alertEmail=' + encodeURIComponent(document.getElementById('setAlertEmail').value);
       msg.style.color = '#888';
       msg.textContent = '保存中…';
       fetch(EXEC_URL + q)
         .then(function (r) { return r.json(); })
         .then(function (s) {
           SETTINGS = s;
+          // サーバが受理した値で入力欄を上書きする（不正値は saveSettings 側で弾かれ元の値が返る）
+          document.getElementById('setWarnAmp').value = s.warnAmp;
+          document.getElementById('setAlertEmail').value = s.alertEmail || '';
           msg.style.color = '#2ca02c';
           msg.textContent = '保存しました';
-          setTimeout(function () { msg.textContent = ''; }, 3000);
+          setTimeout(function () { msg.textContent = ''; }, 2500);
+        })
+        .catch(function (err) {
+          settingsDirty = true;   // 失敗した変更は破棄せず、次の機会に再送する
+          msg.style.color = '#d62728';
+          msg.textContent = '保存に失敗しました';
+          console.error(err);
+        });
+    }
+
+    ['setWarnAmp', 'setAlertEmail'].forEach(function (id) {
+      document.getElementById(id).addEventListener('change', function () {
+        settingsDirty = true;
+        saveSettings();
+      });
+    });
+
+    document.getElementById('setTest').addEventListener('click', function () {
+      var msg = document.getElementById('setMsg');
+      // 押す直前の編集を先に確定させてから送る（アドレスを変えた直後のテストで旧アドレスに送らない）
+      saveSettings();
+      msg.style.color = '#888';
+      msg.textContent = 'テスト送信中…';
+      fetch(EXEC_URL + '?action=testMail')
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (res.ok) {
+            msg.style.color = '#2ca02c';
+            msg.textContent = res.to + ' へ送信しました';
+          } else {
+            msg.style.color = '#d62728';
+            msg.textContent = res.error || '送信できませんでした';
+          }
         })
         .catch(function (err) {
           msg.style.color = '#d62728';
-          msg.textContent = '保存に失敗しました';
+          msg.textContent = '送信できませんでした';
           console.error(err);
         });
     });
