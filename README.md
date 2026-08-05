@@ -6,8 +6,6 @@
 - **ATOM S3 子機対応**
 - **親機フリーズ対策の強化**
 
-Webダッシュボードの画面例：
-
 <table>
 <tr>
 <td><img src="docs/images/dashboard_instant.png" width="220"><br>瞬時</td>
