@@ -6,6 +6,17 @@
 - **ATOM S3 子機対応**
 - **親機フリーズ対策の強化**
 
+Webダッシュボードの画面例：
+
+<table>
+<tr>
+<td><img src="docs/images/dashboard_instant.png" width="220"><br>瞬時</td>
+<td><img src="docs/images/dashboard_today.png" width="220"><br>今日</td>
+<td><img src="docs/images/dashboard_week.png" width="220"><br>週</td>
+<td><img src="docs/images/dashboard_month.png" width="220"><br>月</td>
+</tr>
+</table>
+
 ---
 
 **① Webダッシュボード機能を追加**：スマホ等のブラウザから外出先で電力状況を確認できるダッシュボード（Google Apps Script製）機能を追加しました。ambient データ送信機能は廃止しています。`smm3_main_web.py` をお使いください。詳しくは **[4.ファイル構成]** と **[7.Webダッシュボード]** を参照してください。
