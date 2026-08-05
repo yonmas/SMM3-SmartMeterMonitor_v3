@@ -47,16 +47,18 @@ function doPost(e) {
     }));
   } else if (body.type === 'cuml') {
     PROP.setProperty('cuml', JSON.stringify(body));
-    // 契約アンペアの正本は設定用GSS（CONTRACT_AMPERAGE）。親機が起動時に読んだ値をcumlに同梱して
-    // くるので、届いた分だけキャッシュして設定ページに表示する（GAS側では編集しない）。
-    if (body.contract !== undefined && body.contract !== null && body.contract !== '') {
-      PROP.setProperty('contractAmp', String(body.contract));
-    }
     appendHistory(body.created, body.e_energy);
   } else if (body.type === 'backfill') {
     backfillHistory(body.points);
   } else if (body.type === 'boot') {
     recordBoot(body.cause);
+  } else if (body.type === 'config') {
+    // 親機が起動時に1回だけ送ってくる設定値。今は契約アンペアのみで、正本は設定用GSS。
+    // ここでは設定ページに表示するためにキャッシュするだけ（GAS側からは変更しない）。
+    // 何年も変わらない値なので再送は無く、次の再起動まで前回の値を保持し続ける。
+    if (body.contract !== undefined && body.contract !== null && body.contract !== '') {
+      PROP.setProperty('contractAmp', String(body.contract));
+    }
   }
   return ContentService.createTextOutput('OK');
 }

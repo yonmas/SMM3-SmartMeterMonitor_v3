@@ -590,6 +590,25 @@ def _send_boot_report():
         print('[BOOT] report failed: %s' % e)
 
 
+# 【send】 起動時に1回だけ、設定値をGASへ送る（type:'config'）。
+# 今は契約アンペアのみ。正本は設定用GSSで、GAS側は設定ページでの表示にしか使わない。
+# 何年も変わらない値なので定期送信はせず、起動時の1回で足りる。この1回が失敗しても
+# 次の再起動で送り直されるだけなので、リトライもしない（best-effort）。
+# 呼び出しは set_config() の直後＝GSS読込後。boot報告(_send_boot_report)はGSS読込より前に
+# 送る設計のため、そこへ相乗りさせるとファイル＝前回起動時の値を送ってしまい、シートを直して
+# 再起動しても反映されない（2回再起動が要る）ことになる。それを避けるため別送にしている。
+def _send_config_report():
+    try:
+        resp = _web_post(ujson.dumps({
+            'type': 'config',
+            'contract': config['CONTRACT_AMPERAGE'],
+        }))
+        resp.close()
+        print('[CONF] reported contract=%s' % config['CONTRACT_AMPERAGE'])
+    except Exception as e:
+        print('[CONF] report failed: %s' % e)
+
+
 # 【send】 Web ダッシュボード(GAS)へ積算電力量データ送信：M:CUMLと同じタイミング
 def send_web_cuml(collect, created, e_energy, monthly_e_energy, charge):
     global web_oom_count
@@ -604,10 +623,6 @@ def send_web_cuml(collect, created, e_energy, monthly_e_energy, charge):
             'e_energy': e_energy,
             'monthly_e_energy': monthly_e_energy,
             'charge': charge,
-            # 契約アンペアの正本は設定用GSS。GAS側は設定ページでの表示にのみ使う（編集不可）。
-            # 10分毎のcumlに相乗りさせるのは、inst(30秒毎)を太らせず、設定変更後も10分以内に
-            # 追従できるため。ESP-NOWの M:CUML 文字列は不変なので子機には影響しない。
-            'contract': config['CONTRACT_AMPERAGE'],
         })
         response = _web_post(payload)
         response.close()
@@ -835,6 +850,7 @@ if __name__ == '__main__':
         config = cnfg.update_config_from_gss(api_config, config)
         cnfg.save_config(config)
         config, TIMEOUT_MAIN, WARNING_AMPERAGE, CONTRACT_AMPERAGE = cnfg.set_config(config)
+        _send_config_report()  # 設定値(契約アンペア)をGASへ1回だけ通知。URL未設定なら no-op。
         set_instance(config)
 
         # RTC設定（時刻設定）
