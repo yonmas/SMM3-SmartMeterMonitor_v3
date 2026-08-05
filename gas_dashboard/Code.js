@@ -8,8 +8,9 @@ var PROP = PropertiesService.getScriptProperties();
 // ---- 状態監視(無音検知)設定 ----
 var STALE_SEC = 600;    // この秒数データが途絶えたら「異常(stale)」＝フリーズ/再起動連発/オフラインの疑い
                         // inst=30秒毎/cuml=10分毎なので、単発の再起動(~2-3分)では誤検知しない値
-var ALERT_EMAIL = '';   // 通知先メール。空ならメール送信せずダッシュボード表示のみ。
-                        // Script Propertiesの 'alertEmail' でも上書き可（コード変更不要）
+                        // 異常の通知はダッシュボードの赤画面＋バナーで行う（メール通知は持たない。
+                        // 匿名Webアプリからは MailApp/ScriptApp が権限エラーになり、承認作業を
+                        // 全利用者に強いる割に、画面表示以上の価値が無いため 2026-08-05 に撤去）
 var DEFAULT_WARN_AMP = 30;  // 警告アンペアの初期値。設定用GSSの WARNING_AMPERAGE と同じ既定値だが、
                             // 以降はダッシュボードの設定ページで独立して変更する（シートとは同期しない）
 
@@ -22,10 +23,6 @@ function doGet(e) {
   // URLを知っていれば誰でも変更できるが、変えられて困る値が無いため認証は設けていない。
   if (e.parameter.action === 'saveSettings') {
     return ContentService.createTextOutput(JSON.stringify(saveSettings(e.parameter)))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-  if (e.parameter.action === 'testMail') {
-    return ContentService.createTextOutput(JSON.stringify(sendTestMail()))
       .setMimeType(ContentService.MimeType.JSON);
   }
   var tmpl = HtmlService.createTemplateFromFile('Dashboard');
@@ -88,46 +85,14 @@ function recordBoot(cause) {
 }
 
 // ---- 設定（PropertiesService保存＝家族全員で共通の1組。誰が変えても全員に反映される） ----
-// 警告アンペアとメール通知はGAS内で完結。契約アンペアだけは親機がcumlで送ってくる値の表示専用。
+// 警告アンペアはGAS内で完結。契約アンペアは親機がconfigで送ってくる値の表示専用。
 function getSettings() {
   var warn = parseFloat(PROP.getProperty('warnAmp'));
   var contract = parseFloat(PROP.getProperty('contractAmp'));
-  var lastCheck = PROP.getProperty('lastCheckAt');
   return {
     warnAmp: isNaN(warn) ? DEFAULT_WARN_AMP : warn,
-    contractAmp: isNaN(contract) ? null : contract,
-    // 通知のON/OFFは別フラグを持たず「アドレスが空かどうか」だけで表す（設定項目を二重にしない）
-    alertEmail: PROP.getProperty('alertEmail') || ALERT_EMAIL || '',
-    triggerInstalled: PROP.getProperty('triggerInstalled') === '1',
-    triggerError: PROP.getProperty('triggerError') || null,
-    lastCheckAt: lastCheck || null
+    contractAmp: isNaN(contract) ? null : contract
   };
-}
-
-// 通知の実体である「5分毎の時間トリガー」を、通知先アドレスの有無に合わせて自動で設置/削除する。
-// これによりユーザーの操作は「アドレスを入れる＝ON / 空にする＝OFF」だけで完結する。
-// ScriptApp が権限不足で落ちる可能性があるため必ず try/catch で囲み、失敗しても
-// saveSettings 全体（ひいてはダッシュボード）を巻き込まないようにする。失敗の内容は
-// triggerError に残し、設定ページで手動設置を案内する材料にする。
-function syncHealthTrigger(email) {
-  try {
-    var existing = ScriptApp.getProjectTriggers().filter(function (t) {
-      return t.getHandlerFunction() === 'checkHealth';
-    });
-    if (email) {
-      if (existing.length === 0) {
-        ScriptApp.newTrigger('checkHealth').timeBased().everyMinutes(5).create();
-      }
-      PROP.setProperty('triggerInstalled', '1');
-    } else {
-      existing.forEach(function (t) { ScriptApp.deleteTrigger(t); });
-      PROP.deleteProperty('triggerInstalled');
-      PROP.deleteProperty('lastCheckAt');   // 次にONにした時、古い打刻を生存と誤認しないよう消す
-    }
-    PROP.deleteProperty('triggerError');
-  } catch (e) {
-    PROP.setProperty('triggerError', String((e && e.message) || e));
-  }
 }
 
 // 送られてきたパラメータのうち、指定されたものだけ更新する（未指定の項目は現状維持）
@@ -136,33 +101,7 @@ function saveSettings(p) {
     var w = parseFloat(p.warnAmp);
     if (!isNaN(w) && w > 0) PROP.setProperty('warnAmp', String(w));
   }
-  if (p.alertEmail !== undefined) {
-    var email = String(p.alertEmail).trim();
-    var before = PROP.getProperty('alertEmail') || '';
-    PROP.setProperty('alertEmail', email);
-    // 空⇔非空が変わった時だけトリガーを触る（毎回ScriptAppを叩かない）
-    if (!!email !== !!before) syncHealthTrigger(email);
-  }
   return getSettings();
-}
-
-// 設定ページの「テスト送信」。通知先が正しいかを、親機が実際に止まるのを待たずに確かめる。
-// MailAppが権限エラーを投げてもこの分岐の中で握り潰し、他のaction（特にaction=data）に
-// 波及させない。ダッシュボード全体を落とさないことを最優先する。
-function sendTestMail() {
-  var email = PROP.getProperty('alertEmail') || ALERT_EMAIL;
-  if (!email) {
-    return { ok: false, error: '通知先アドレスが未設定です' };
-  }
-  try {
-    MailApp.sendEmail(email, '[SMM3] テスト送信',
-      'SMM3ダッシュボードからのテストメールです。\n' +
-      'このメールが届いていれば、通知先の設定は正しく行われています。\n\n' +
-      '実際の通知は、親機からのデータが' + STALE_SEC + '秒以上途絶えたときに送られます。');
-    return { ok: true, to: email };
-  } catch (e) {
-    return { ok: false, error: '送信に失敗しました: ' + e.message };
-  }
 }
 
 function getDashboardData() {
@@ -227,45 +166,6 @@ function getHealth(now) {
     lastType: PROP.getProperty('lastType') || null,
     thresholdSec: STALE_SEC
   };
-}
-
-// 時間トリガ(installHealthTriggerで5分毎に設置)から呼ばれる。状態が変化した時だけ通知。
-// 監視のみ＝検知して知らせるだけ。再起動などの復旧アクションは一切しない。
-function checkHealth() {
-  // トリガーが生きている証跡。設定ページの「監視トリガーの状態」はこの鮮度だけで判定する
-  // （ScriptApp.getProjectTriggers()は匿名アクセスから呼べないため。getSettings()のコメント参照）
-  PROP.setProperty('lastCheckAt', new Date().toISOString());
-
-  var h = getHealth(new Date());
-  var prev = PROP.getProperty('alertState') || 'ok';
-  // アドレスが空＝通知OFF。空でもalertStateの遷移だけは記録する
-  // （アドレスを設定した直後に、過去の異常で誤発報しないため）
-  var email = PROP.getProperty('alertEmail') || ALERT_EMAIL;
-
-  if (h.status === 'stale' && prev !== 'stale') {
-    if (email) {
-      MailApp.sendEmail(email, '[SMM3] 親機データ未着（異常）',
-        '親機からのデータが約' + h.ageSec + '秒途絶えています（閾値' + h.thresholdSec + '秒）。\n' +
-        '最終受信: ' + h.lastSeenAt + ' / 種別: ' + h.lastType);
-    }
-    PROP.setProperty('alertState', 'stale');
-  } else if (h.status === 'ok' && prev === 'stale') {
-    if (email) {
-      MailApp.sendEmail(email, '[SMM3] 親機データ復帰',
-        'データ受信が復帰しました。最終受信: ' + h.lastSeenAt);
-    }
-    PROP.setProperty('alertState', 'ok');
-  }
-}
-
-// 手動設置用のフォールバック。通常は通知先アドレスを入れた時に syncHealthTrigger() が
-// 自動で設置するので実行不要。自動設置が権限等で失敗した場合にエディタから一度だけ実行する。
-// （重複回避のため既存のcheckHealthトリガは削除してから作り直す）
-function installHealthTrigger() {
-  ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (t.getHandlerFunction() === 'checkHealth') ScriptApp.deleteTrigger(t);
-  });
-  ScriptApp.newTrigger('checkHealth').timeBased().everyMinutes(5).create();
 }
 
 // 30分×48スロット → 1時間×24（smm3_sub_core2.pyのdraw_table相当の集計単位に合わせる）
