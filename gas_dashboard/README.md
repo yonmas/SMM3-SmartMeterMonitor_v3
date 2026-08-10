@@ -17,9 +17,16 @@ GASの操作に不慣れな方向けに、画面操作レベルで手順を書�
 
 ## 2. ファイルをコピーする
 
-このリポジトリの `gas_dashboard/` には4つのソースファイルがありますが、GAS側では
+このリポジトリの `gas_dashboard/` には`Code.js`・`History.js`・`Dashboard.html`・
+`appsscript.json`の4つの必須ソースファイルがありますが、GAS側では
 「スクリプトファイル」2つ（Code・History）と「HTMLファイル」1つ（Dashboard）、
 それにマニフェスト（appsscript.json）として登録します。
+
+（`gas_dashboard/`にはこの他に`SampleData.js`もありますが、これはリポジトリ管理者自身が
+運用しているサンプル公開用デプロイ専用の固定データです。`Code.js`内の
+`SAMPLE_DEPLOYMENT_ID`・`isSampleDeployment()`等も同じ仕組みの一部で、判定は
+発行されるデプロイURL自体で行うため、あなた自身のデプロイでは常にfalseになるだけで
+動作に影響しません。コピー先には含めなくても問題ありません。）
 
 1. **Code.gs**：デフォルトで存在する `コード.gs` を開き、中身を全部削除して
    [`Code.js`](Code.js) の内容をそのままコピー＆ペースト。
