@@ -1,17 +1,9 @@
 # SMM3 : Smart Meter Monitor v.3
 
-## お知らせ（2026/08/09）通信効率化・Ambientオプション対応
+## お知らせ（2026/08/10）
 
-- **GASへの送信プロトコルを見直し、効率化しました**。履歴データ（バックフィル）送信のペイロード形式を変更したため、**以前このリポジトリの`gas_dashboard/`をコピーして既にデプロイ済みの方は、GAS側のスクリプトを最新の`gas_dashboard/`の内容に更新してください**。旧形式のまま（更新前のコピー）だと新形式のデータを受け付けません（お使いの方はいないと思いますが念のため）。
-- 前回のアップデートで「廃止した」としていた **ambient データ送信機能を、オプションとして再対応** しました。正式版（`smm3_main_web.py`）は引き続き ambient 送信を含みませんが、使いたい場合の情報・対応コードを [`ambient/`](ambient/README.md) にまとめてあります。
-
----
-
-## お知らせ（2026/08/05）大型アップデート
-
-- **Webダッシュボード機能を追加**
-- **ATOM S3 子機対応**
-- **親機フリーズ対策の強化**
+- **Webダッシュボードに瞬時電力グラフを追加**
+- **Ambient対応を復活**
 
 <table>
 <tr>
@@ -21,6 +13,18 @@
 <td><img src="docs/images/dashboard_month.png" width="220"><br>月</td>
 </tr>
 </table>
+
+- **Webダッシュボード**（[Sample](https://smm3-sample.netlify.app/)）に瞬時電力のグラフを追加しました。最大7日間を表示し、データはGoogleスプレッドシートに、直近約1年間分を記録します。
+- **ambient データ送信機能を、オプションとして復活** させました。ambient対応に関する情報・対応コードは [`ambient/`](ambient/README.md) にまとめてあります。正式版（`smm3_main_web.py`）は引き続き ambient 送信を含みません。
+- **起動時のWebダッシュボード（GAS）への履歴データ送信プロトコルを見直しました**。起動時の履歴データ送信方式を変更したため、親機のコードおよびダッシュボードのスクリプト`gas_dashboard/`を一括で更新してください。
+
+---
+
+## お知らせ（2026/08/05）大型アップデート
+
+- **Webダッシュボード機能を追加**
+- **ATOM S3 子機対応**
+- **親機フリーズ対策の強化**
 
 ---
 
@@ -135,7 +139,7 @@ Ambient でアカウントを作成し、チャネルを作成。チャネルID�
 gas_dashboard/
   +- Code.js / History.js / Dashboard.html / appsscript.json
   （Google Apps Script のプロジェクトへコピーしてご自身のGoogleアカウントでデプロイ。
-    発行された Web アプリ URL を config_main.json の WEB_GAS_URL に設定してください。）
+    発行されたデプロイID（`AKfycb...`）を config_main.json の WEB_GAS_URL に設定してください。）
 ```
 
 ```text

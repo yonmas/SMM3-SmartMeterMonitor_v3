@@ -411,8 +411,7 @@ def reload_config(config):
 
     config = cnfg.update_config_from_gss(api_config, config)
     cnfg.save_config(config)
-    WEB_GAS_URL = config.get('WEB_GAS_URL', '')  # GSSでURLが変わっていれば送信先も更新
-    _set_web_endpoint()
+    # GAS送信先はconfigファイル起動時の値に固定し、GSSでは更新しない
     config, TIMEOUT_MAIN, WARNING_AMPERAGE, CONTRACT_AMPERAGE = cnfg.set_config(config)
     set_instance(config)  # インスタンスを再定義
     collect, _, _, monthly_e_energy, charge, _ = send_cumul()  # 料金を再計算
@@ -562,24 +561,21 @@ _WEB_HOST = ''
 _WEB_PATH = ''
 
 
+# config['WEB_GAS_URL']（デプロイID限定、例：AKfycb...）から host/path を組み立てて
+# _web_post 用グローバルへ格納する。フルURL/ID自動判定の分岐（'://' in判定・split()）は
+# 撤去し、単純な文字列連結（'%'フォーマット）だけにしている（2026-08-10、子機+Web+Ambient
+# 全部乗せ構成はメモリがぎりぎりのため、この処理の一時オブジェクト生成も断片化の一因になり得る
+# と判明したことを踏まえた対策。GSS読込みは行わず、起動時のconfigファイル読込み1回のみで確定）。
+# 空文字は送信無効のまま。
 def _set_web_endpoint():
-    # config['WEB_GAS_URL'] を host / path に分解して _web_post 用グローバルへ格納。
-    # デプロイID単体（例：AKfycb...）が入っていれば script.google.com/macros/s/{id}/exec を
-    # 組み立てる。'://' を含むフルURLが入っていればそのまま解析する（モックGAS・/dev版など
-    # 任意の送信先に差し替えられる柔軟性を維持するため）。空文字は送信無効のまま。
-    # 起動時（config読込後）と reload_config（GSSリロード後）から呼ぶ。
     global _WEB_HOST, _WEB_PATH
     try:
-        if not WEB_GAS_URL:
+        if WEB_GAS_URL:
+            _WEB_HOST = 'script.google.com'
+            _WEB_PATH = '/macros/s/%s/exec' % WEB_GAS_URL
+        else:
             _WEB_HOST = ''
             _WEB_PATH = ''
-        elif '://' in WEB_GAS_URL:
-            _p = WEB_GAS_URL.split('/', 3)
-            _WEB_HOST = _p[2]                # 'script.google.com'
-            _WEB_PATH = '/' + _p[3]         # '/macros/s/..../exec'
-        else:
-            _WEB_HOST = 'script.google.com'
-            _WEB_PATH = '/macros/s/' + WEB_GAS_URL + '/exec'
     except Exception:
         _WEB_HOST = ''
         _WEB_PATH = ''
@@ -902,8 +898,7 @@ if __name__ == '__main__':
         api_config = cnfg.get_api_config()
         config = cnfg.update_config_from_gss(api_config, config)
         cnfg.save_config(config)
-        WEB_GAS_URL = config.get('WEB_GAS_URL', '')  # GSSでURLが変わっていれば送信先も更新（reload_config()と同じ再同期）
-        _set_web_endpoint()
+        # GAS送信先はファイル起動時の値に固定し、GSSでは更新しない（_set_web_endpoint()の呼び出しは起動時1回のみ）
         config, TIMEOUT_MAIN, WARNING_AMPERAGE, CONTRACT_AMPERAGE = cnfg.set_config(config)
         _send_config_report()  # 設定値(契約アンペア)をGASへ1回だけ通知。URL未設定なら no-op。
         set_instance(config)

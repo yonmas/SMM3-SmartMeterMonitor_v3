@@ -207,8 +207,13 @@ finally: reset()   ← どんな未捕捉例外でも「再起動」に落とす
   として扱い、差分計算を特別扱いしないため）。`d==0` の0だけは「未計測」なので送らない。
 - **デプロイの罠**: Code.js等を変更しても、GASで「新しいデプロイ」を作成しない限り
   親機が叩く `/exec` URLの動作は変わらない（テストは `/dev` URL）。また新デプロイでURLが
-  変わった場合は親機の `config['WEB_GAS_URL']`（`config_main.json`、または設定用GSSの
-  `WEB_GAS_URL`行）の更新が必要（コードへの直書きではない）。
+  変わった場合は親機の `config['WEB_GAS_URL']`の更新が必要（コードへの直書きではない）。
+  値はデプロイID限定（`AKfycb...`）に統一済み（2026-08-10）。
+  `smm3_main_web.py`（正式版）・`ambient/*_mini.py`は`config_main.json`と設定用GSSの
+  どちらからでも読み込む。一方
+  `ambient/smm3_main_web_amb.py`・`ambient/smm3-lite_main_web_amb.py`（子機+Web+Ambient
+  全部乗せ）は2026-08-10以降、メモリ制約対策として`config_main.json`起動時読込みのみに固定
+  （GSSでは更新されない）、値もデプロイID限定（詳細は[[ambient/README.md]]参照）。
 - **サンプル公開デプロイ（`smm3-sample`、2026-08-10〜）**：README等に恒久リンクする公開用デプロイは、
   同一スクリプト・同一データストア（PROP/History/InstLogシート）を共有する別デプロイとして作る。
   クエリパラメータでの分岐は**使わない**（URLからパラメータを外されると実データが素通りする）。

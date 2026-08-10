@@ -524,24 +524,20 @@ _WEB_HOST = ''
 _WEB_PATH = ''
 
 
+# config['WEB_GAS_URL']（デプロイID限定、例：AKfycb...）から host/path を組み立てて
+# _web_post 用グローバルへ格納する。フルURL/ID自動判定の分岐（'://' in判定・split()）は
+# 撤去し、単純な文字列連結（'%'フォーマット）だけにしている（2026-08-10、ambient版の
+# メモリ検証を踏まえてバリエーションを揃えるため）。空文字は送信無効のまま。
+# 起動時（config読込後）と reload_config（GSSリロード後）から呼ぶ。
 def _set_web_endpoint():
-    # config['WEB_GAS_URL'] を host / path に分解して _web_post 用グローバルへ格納。
-    # デプロイID単体（例：AKfycb...）が入っていれば script.google.com/macros/s/{id}/exec を
-    # 組み立てる。'://' を含むフルURLが入っていればそのまま解析する（モックGAS・/dev版など
-    # 任意の送信先に差し替えられる柔軟性を維持するため）。空文字は送信無効のまま。
-    # 起動時（config読込後）と reload_config（GSSリロード後）から呼ぶ。
     global _WEB_HOST, _WEB_PATH
     try:
-        if not WEB_GAS_URL:
+        if WEB_GAS_URL:
+            _WEB_HOST = 'script.google.com'
+            _WEB_PATH = '/macros/s/%s/exec' % WEB_GAS_URL
+        else:
             _WEB_HOST = ''
             _WEB_PATH = ''
-        elif '://' in WEB_GAS_URL:
-            _p = WEB_GAS_URL.split('/', 3)
-            _WEB_HOST = _p[2]                # 'script.google.com'
-            _WEB_PATH = '/' + _p[3]         # '/macros/s/..../exec'
-        else:
-            _WEB_HOST = 'script.google.com'
-            _WEB_PATH = '/macros/s/' + WEB_GAS_URL + '/exec'
     except Exception:
         _WEB_HOST = ''
         _WEB_PATH = ''
