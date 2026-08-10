@@ -1,3 +1,10 @@
+<!--
+  開発・検証用の控え（2026-08-10時点のDashboard.htmlから分岐）。
+  InstLogの「テストデータ(1週間)/実データ」切替UIを残したまま保持している。
+  本番のDashboard.htmlはこの機能を撤去して実データのみに固定したため、
+  InstLog周りの動作確認をしたい時はこちらを一時的にDashboard.htmlへ上書きして使う。
+  .claspignoreで除外しているためclasp pushでは送られない（GAS上には存在しない）。
+-->
 <!DOCTYPE html>
 <html>
 <head>
@@ -130,10 +137,12 @@
     .inst-log-sub-row { display: flex; justify-content: space-between; align-items: baseline; margin: 10px 0 6px; }
     .inst-log-range-caption { font-size: 12px; color: var(--text-secondary); }
     .inst-log-source-group { display: flex; align-items: baseline; gap: 8px; }
-    /* InstLog取得状態の表示のみ（読込中/データなし/取得失敗）。クリック操作は無いので
-       他の説明ラベルと同じtext-secondaryにする（切替UIは撤去、テストデータ確認用の
-       控えはDashboard.dev.htmlに保持） */
-    .inst-log-source { font-size: 12px; color: var(--text-secondary); }
+    /* データソース切替（実験段階の暫定UI）。既存の「サンプルデータ」表記と同じhighlightで、
+       押せることが分かるよう下線をつける */
+    .inst-log-source {
+      background: none; border: none; padding: 0; font-size: 12px;
+      color: var(--highlight); text-decoration: underline dotted; text-underline-offset: 2px;
+    }
     /* touch-action:noneで縦スクロール/ブラウザのピンチズームより先にJS側のタッチ処理を効かせる */
     #instLogCanvas {
       display: block; width: 100%; height: 288px; max-height: none; margin-top: 22px;
@@ -233,7 +242,7 @@
       <div class="inst-log-sub-row">
         <div class="inst-log-range-caption">直近表示</div>
         <div class="inst-log-source-group">
-          <span id="instLogSourceStatus" class="inst-log-source"></span>
+          <button type="button" id="instLogSourceToggle" class="inst-log-source">テストデータ(1週間)</button>
         </div>
       </div>
       <div class="inst-log-ranges">
@@ -1130,9 +1139,11 @@
         draw();
       }
 
-      // テストデータ/実データの切替UIは実データで十分検証できたため撤去し、実データ固定にした。
-      // 切替版はDashboard.dev.htmlに残してあるので、InstLog周りを検証したい時はそちらを使う
-      // 初期表示は6時間分＋余裕を見て直近1000行だけ（30秒間隔で1000行≈8.3時間）。
+      // サンプル(合成)データは確認用に使っていたが、実データ・テストデータで十分検証できたため撤去。
+      // 最終的にはテストデータの切替UIごと外して実データのみにする予定（現時点ではまだ確認中）
+      var DATA_SOURCES = ['real', 'test'];
+      var DATA_SOURCE_LABELS = { real: '実データ', test: 'テストデータ(1週間)' };
+      // 初期表示は6時間分＋余裕を見て直近1000行だけ（実データ側は30秒間隔で1000行≈8.3時間）。
       // 初期表示は即座に済ませ、残りはここでは待たず裏で取りに行く
       var INITIAL_TAIL_ROWS = 1000;
       // 裏取得（初期表示で足りなかった分）の上限。「全件」ではなく、グラフの表示スコープの
@@ -1140,36 +1151,44 @@
       // 同じ換算）に固定する。こうしておけば、将来InstLog側の保持期間を延ばして
       // （＝ローリング削除をやめて）何年分溜まっても、表示に使わない分まで毎回読みに行くことはない
       var MAX_SCOPE_TAIL_ROWS = 20160;
-      var sourceStatusEl = document.getElementById('instLogSourceStatus');
+      var currentSource = 'test';  // 実データ・テストデータ検証中の暫定デフォルト
+      var sourceBtn = document.getElementById('instLogSourceToggle');
 
-      function fetchInstLog(tail) {
-        var url = EXEC_URL + '?action=instlog&source=real' + (tail ? ('&tail=' + tail) : '');
+      function fetchInstLog(source, tail) {
+        var url = EXEC_URL + '?action=instlog&source=' + source + (tail ? ('&tail=' + tail) : '');
         return fetch(url).then(function (r) { return r.json(); });
       }
 
-      function loadSource() {
-        sourceStatusEl.textContent = '読込中';
-        fetchInstLog(INITIAL_TAIL_ROWS).then(function (result) {
+      function loadSource(source) {
+        currentSource = source;
+        sourceBtn.textContent = DATA_SOURCE_LABELS[source] + '…読込中';
+        fetchInstLog(source, INITIAL_TAIL_ROWS).then(function (result) {
           var pairs = result.points || [];
           setPoints(pairs);
-          sourceStatusEl.textContent = pairs.length ? '' : 'データなし';
+          sourceBtn.textContent = DATA_SOURCE_LABELS[source] + (pairs.length ? '' : '（データなし）');
           if (result.truncated) {
             // 直近分は即時表示できたので、表示スコープの上限（7日分）まで裏で追加取得して
             // 静かに差し替える。「全件」を投げないのは、InstLog側の保持期間が将来延びても
             // 表示に使わない分まで毎回読み込まないようにするため
-            fetchInstLog(MAX_SCOPE_TAIL_ROWS).then(function (full) {
+            fetchInstLog(source, MAX_SCOPE_TAIL_ROWS).then(function (full) {
               mergePoints(full.points || []);
             }).catch(function (err) { console.error('instlog background fetch failed', err); });
           }
         }).catch(function (err) {
           console.error('instlog fetch failed', err);
-          sourceStatusEl.textContent = '取得失敗';
+          sourceBtn.textContent = DATA_SOURCE_LABELS[source] + '（取得失敗）';
         });
       }
+
+      sourceBtn.addEventListener('click', function () {
+        var idx = DATA_SOURCES.indexOf(currentSource);
+        loadSource(DATA_SOURCES[(idx + 1) % DATA_SOURCES.length]);
+      });
 
       // 「直近」を見ている（viewEndが最新データちょうどに一致＝プリセットボタン直後や
       // 右端まで戻した状態）時だけ、新着データに合わせて表示範囲も一緒に前へスライドさせる。
       // 過去を見ている（手動でパン/ズームして離れた）時は、データだけ裏で増やして表示は動かさない。
+      // ライブ性があるのは実データだけなので、対象はsourceが'real'の時のみ
       var LIVE_POLL_TAIL = 5;  // 30秒間隔ならほぼ1件だが、遅延・リトライ分の余裕を持たせる
       // PC等でタブがバックグラウンドになるとブラウザがsetIntervalを間引く（Chrome等は
       // 非表示タブのタイマーをかなり遅らせる）。その間も実データは送られ続けているため、
@@ -1180,13 +1199,14 @@
         return viewEnd === dataMaxT;
       }
       function pollInstLog() {
+        if (currentSource !== 'real') return;
         var staleMs = Date.now() - dataMaxT;
         if (staleMs > LIVE_POLL_STALE_RELOAD_MS) {
-          loadSource();
+          loadSource('real');
           return;
         }
         var neededTail = Math.max(LIVE_POLL_TAIL, Math.ceil(staleMs / 25000) + 5);
-        fetchInstLog(neededTail).then(function (result) {
+        fetchInstLog('real', neededTail).then(function (result) {
           var pairs = (result.points || []).filter(function (p) { return p[0] > dataMaxT; });
           if (!pairs.length) return;
           var wasLive = isFollowingLive();
@@ -1202,9 +1222,11 @@
         }).catch(function (err) { console.error('instlog poll failed', err); });
       }
       setInterval(pollInstLog, 30000);
-      // 実データを取り直す（更新確認用）。表示期間ボタン行の右端に置く
+      // ソースは切り替えずに今のソースだけ取り直す（実データの更新確認・テストデータのseed直後の
+      // 反映など、ソース一周させずに再取得したい場面向け）。表示期間ボタン行の右端に置く
+      // （テストデータ/実データの横にも同じ機能のボタンがあったが二重だったため撤去）
       document.getElementById('instLogRangeRefresh').addEventListener('click', function () {
-        loadSource();
+        loadSource(currentSource);
       });
 
       // draw()と横幅変化の判定(handleResize)で同じ余白を使うため定数化
@@ -1620,7 +1642,7 @@
 
       window.addEventListener('resize', handleResize);
       resizeCanvas();
-      loadSource();
+      loadSource(currentSource);
     })();
 
     render(DATA);

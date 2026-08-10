@@ -3,7 +3,7 @@
   "B_PASSWORD": "【必須】Bルートのパスワード(半角12文字)",
   "A_ID": "*",
   "A_KEY": "*",
-  "WEB_GAS_URL": "【任意】GASダッシュボードのWebアプリURL(https://script.google.com/macros/s/.../exec)。未使用なら空文字",
+  "WEB_GAS_URL": "【任意】GASダッシュボードのWebアプリURL。デプロイID(AKfycb...)だけでも、フルURL(https://script.google.com/macros/s/.../exec)でも可。未使用なら空文字",
   "A_INTERVAL": 30,
   "CONTRACT_AMPERAGE": 40,
   "WARNING_AMPERAGE": 30,

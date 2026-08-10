@@ -1,5 +1,12 @@
 # SMM3 : Smart Meter Monitor v.3
 
+## お知らせ（2026/08/09）通信効率化・Ambientオプション対応
+
+- **GASへの送信プロトコルを見直し、効率化しました**。履歴データ（バックフィル）送信のペイロード形式を変更したため、**GAS側のスクリプトも新版への更新が必要**です。旧版のGASスクリプト（`gas_dashboard/`）はそのままでは新形式のデータを受け付けません（お使いの方はいないと思いますが念のため）。
+- 前回のアップデートで「廃止した」としていた **ambient データ送信機能を、オプションとして再対応** しました。正式版（`smm3_main_web.py`）は引き続き ambient 送信を含みませんが、使いたい場合の情報・対応コードを [`ambient/`](ambient/README.md) にまとめてあります。
+
+---
+
 ## お知らせ（2026/08/05）大型アップデート
 
 - **Webダッシュボード機能を追加**
@@ -100,25 +107,22 @@ Ambient でアカウントを作成し、チャネルを作成。チャネルID�
 
 スマートメーターの履歴保持期間によって通常バージョンか、liteバージョンをお選びください。まずは通常バージョンを試して、30日間グラフが途中までしか描かれない場合は履歴保持期間が短いメーターなので、liteバージョンを使ってください。
 
-親機は、Webダッシュボード（外出先からスマホ等で確認）を使うかどうかで `smm3_main.py` / `smm3_main_web.py` のどちらかを選んでください。子機は、Basic/Core2（下記）と ATOM S3（さらに下）から使用機器に合わせて選んでください。
+親機は `smm3_main_web.py` をお使いください（liteバージョンをお使いの場合は `smm3-lite_main_web.py`）。ハードウォッチドッグ等のフリーズ対策が入った正式版です。Webダッシュボードを使わない場合も、`config_main.json` の `WEB_GAS_URL` を空欄のままにしておけば送信は自動的に無効化され、Webダッシュボード無しの運用として問題なく使えます。
+
+（Web機能を持たない旧バージョン `smm3_main.py` は `archives/` へ移動しました。フリーズ対策が入っていないため、現在は非推奨です。）子機は、Basic/Core2（下記）と ATOM S3（さらに下）から使用機器に合わせて選んでください。
 ```text
 ■■ 親機（main)：M5StickC Plus + Wi-SUN HAT(with BP35A1 module) ■■
 
 /apps/
-  +- smm3_main.py (親機メインプログラム)
+  +- smm3_main_web.py (親機メインプログラム ※後述)
   or
-  +- smm3_main_web.py (親機メインプログラム Webダッシュボード対応版 ※後述)
-  or
-  +- smm3-lite_main.py (親機メインプログラム liteバージョン)
-  or
-  +- smm3-lite_main_web.py (親機メインプログラム liteバージョン Webダッシュボード対応版 ※後述)
+  +- smm3-lite_main_web.py (親機メインプログラム liteバージョン ※後述)
 
 /（ルート）
   +- bp35a1.py (BP35A1クラス)
   +- func_main.py (外部モジュール)
   +- calc_charge.py (電気料金計算モジュール ※必要な計算モジュールをリネーム)
   +- logging.py (別途準備)
-  +- ambient.py (オプション：別途準備)
   ===== 以下のファイルはGSSによる設定を行わない場合のみ使用 =====
   +- api_config.json (オプション：設定用GoogleスプレッドシートのAPI情報)
   +- config_main.json (オプション：親機設定ファイル。smm3_main_web.py を使う場合は WEB_GAS_URL も設定。config_files/config_main.json のサンプル参照)
@@ -176,8 +180,9 @@ gas_dashboard/
 
 #### モジュールのダウンロードはこちらから
 
-[ambient.py](https://github.com/AmbientDataInc/ambient-python-lib/blob/master/ambient.py)  
 [logging.py](https://github.com/m5stack/M5Stack_MicroPython/blob/master/MicroPython_BUILD/components/micropython/esp32/modules/logging.py)
+
+（Ambientへのデータ送信を行いたい場合は、外部ライブラリのダウンロードは不要です。**[ambient/](ambient/README.md)** に自前の軽量クライアント込みで対応版をまとめています。）
 
 ## 5. 初期設定
 
@@ -215,6 +220,12 @@ Step-3.（`smm3_main_web.py` を使う場合のみ）Webダッシュボード（
 **[gas_dashboard/README.md](gas_dashboard/README.md)** にまとめました。
 
 閲覧用URLの扱いに関する注意点（第三者に見えてしまう設定であること）も上記READMEに記載しています。
+
+## 8. Ambient対応（オプション）
+
+正式版（`smm3_main_web.py`）は [Ambient](https://ambidata.io/) へのデータ送信機能を含みません。子機(ESP-NOW)・Webダッシュボード(GAS)・Ambientの3つを同時に動かすと、メモリ制約により履歴データ送信の成功率が下がることが検証で確認されたためです。
+
+それでもAmbientを使いたい場合は、**[`ambient/`](ambient/README.md)** に対応版と詳細情報（セットアップ手順、送信プロトコル、既知の制限、改造方法など）をまとめています。子機表示を諦めれば送信成功率100%の版も用意しています。
 
 ## その他
 

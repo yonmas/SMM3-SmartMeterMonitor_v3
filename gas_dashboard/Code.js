@@ -19,6 +19,16 @@ function doGet(e) {
     return ContentService.createTextOutput(JSON.stringify(getDashboardData()))
       .setMimeType(ContentService.MimeType.JSON);
   }
+  // InstLogグラフ用。source=test は負荷テスト専用のInstLogTestシート（20160行の合成データ、
+  // seedTestInstLog()で生成）、それ以外は本番InstLogの実データ。まだ実験段階の口なので
+  // ダッシュボード側にはUIから明示的に切り替えるトグルを用意している。
+  // tail=N を付けると末尾N行だけ（＝初期表示の高速化用）、無指定なら全件を返す
+  if (e.parameter.action === 'instlog') {
+    var tail = e.parameter.tail ? parseInt(e.parameter.tail, 10) : null;
+    var result = e.parameter.source === 'test' ? readInstLogTestRows(tail) : readInstLogRows(tail);
+    return ContentService.createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
   // 設定の保存。既存の action=data と同じGETの流儀に揃える（Netlifyのiframe越しでも確実に通る）。
   // URLを知っていれば誰でも変更できるが、変えられて困る値が無いため認証は設けていない。
   if (e.parameter.action === 'saveSettings') {
@@ -46,11 +56,12 @@ function doPost(e) {
       muted: !!body.muted,
       updatedAt: new Date().toISOString()
     }));
+    appendInstLog(body.watt, body.amp);
   } else if (body.type === 'cuml') {
     PROP.setProperty('cuml', JSON.stringify(body));
     appendHistory(body.created, body.e_energy);
   } else if (body.type === 'backfill') {
-    backfillHistory(body.points);
+    backfillHistory(body.created, body.e_energy);
   } else if (body.type === 'boot') {
     recordBoot(body.cause);
   } else if (body.type === 'config') {

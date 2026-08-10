@@ -523,12 +523,22 @@ _WEB_PATH = ''
 
 def _set_web_endpoint():
     # config['WEB_GAS_URL'] を host / path に分解して _web_post 用グローバルへ格納。
-    # 起動時（config読込後）と reload_config（GSSリロード後）から呼ぶ。空URLなら両方 '' に。
+    # デプロイID単体（例：AKfycb...）が入っていれば script.google.com/macros/s/{id}/exec を
+    # 組み立てる。'://' を含むフルURLが入っていればそのまま解析する（モックGAS・/dev版など
+    # 任意の送信先に差し替えられる柔軟性を維持するため）。空文字は送信無効のまま。
+    # 起動時（config読込後）と reload_config（GSSリロード後）から呼ぶ。
     global _WEB_HOST, _WEB_PATH
     try:
-        _p = WEB_GAS_URL.split('/', 3)
-        _WEB_HOST = _p[2]                # 'script.google.com'
-        _WEB_PATH = '/' + _p[3]         # '/macros/s/..../exec'
+        if not WEB_GAS_URL:
+            _WEB_HOST = ''
+            _WEB_PATH = ''
+        elif '://' in WEB_GAS_URL:
+            _p = WEB_GAS_URL.split('/', 3)
+            _WEB_HOST = _p[2]                # 'script.google.com'
+            _WEB_PATH = '/' + _p[3]         # '/macros/s/..../exec'
+        else:
+            _WEB_HOST = 'script.google.com'
+            _WEB_PATH = '/macros/s/' + WEB_GAS_URL + '/exec'
     except Exception:
         _WEB_HOST = ''
         _WEB_PATH = ''
@@ -708,17 +718,18 @@ def send_web_hist_half(d, half):
         return True
 
     date_str = hist_date_to_full(d)
-    points = []
+    # created[]/e_energy[]の配列2本にしてキー名の繰り返しを無くし、ペイロードを圧縮する
+    # （{created,e_energy}をpt数分繰り返すオブジェクト配列よりJSONサイズ約43%削減）。
+    created_list = []
+    e_energy_list = []
     for k in range(half * 24, half * 24 + 24):
         if d == 0 and hist_data[d][k] == 0:
             continue  # 今日(d=0)はまだ24時になっていない＝未来分の0は「未計測」なので送らない
         time_str = '{:02d}:{:02d}:00'.format(k // 2, (k % 2) * 30)
-        points.append({
-            'created': date_str + ' ' + time_str,
-            'e_energy': round(hist_data[d][k] * UNIT, 1)
-        })
+        created_list.append(date_str + ' ' + time_str)
+        e_energy_list.append(round(hist_data[d][k] * UNIT, 1))
 
-    if not points:
+    if not created_list:
         return True  # 送る対象が無い＝再送信の必要も無いので成功扱い
 
     gc.collect()
@@ -727,18 +738,18 @@ def send_web_hist_half(d, half):
     print('[BF] d%d half%d pre total=%d largest=%d' % (d, half, _bf_total, _bf_largest))  # [BF_TREND]
 
     try:
-        payload = ujson.dumps({'type': 'backfill', 'points': points})
+        payload = ujson.dumps({'type': 'backfill', 'created': created_list, 'e_energy': e_energy_list})
         response = _web_post(payload)
         response.close()
-        print('[BF] d%d half%d OK %dpt' % (d, half, len(points)))  # [BF_TREND]
+        print('[BF] d%d half%d OK %dpt' % (d, half, len(created_list)))  # [BF_TREND]
         return True
 
     except Exception as e:
         if 'Redirect' in str(e):
-            print('[BF] d%d half%d OK(redirect) %dpt' % (d, half, len(points)))  # [BF_TREND]
+            print('[BF] d%d half%d OK(redirect) %dpt' % (d, half, len(created_list)))  # [BF_TREND]
             return True
         else:
-            print('[BF] d%d half%d ERR %s mf%d' % (d, half, type(e).__name__, mf))  # [BF_TREND]
+            print('[BF] d%d half%d ERR %s: %s mf%d' % (d, half, type(e).__name__, e, mf))  # [BF_TREND]
             return False
 
 
@@ -803,6 +814,7 @@ if __name__ == '__main__':
         # WiFi　&ESP-NOW 設定
         lcd.orient(orient)  # 横向き（純正のWiFi画面を使わないので縦向きにする必要が無い）
         lcd.clear()
+        beep()  # 起動音：WiFi接続を待たず最初に鳴らす（再起動に気付けるように）
         # WiFi接続：接続できるまで自動リトライする。従来の autoConnect(lcdShow=True) は失敗時に
         # UIFlowのオレンジ再接続画面でボタン待ち＝停止してしまうため、lcdShow=Falseで自前ループにする。
         # 画面表示は起動時の他メッセージと同じ status()（横向き・中央、シリアルにも[STAT]で出る）に揃える。
@@ -849,6 +861,8 @@ if __name__ == '__main__':
         api_config = cnfg.get_api_config()
         config = cnfg.update_config_from_gss(api_config, config)
         cnfg.save_config(config)
+        WEB_GAS_URL = config.get('WEB_GAS_URL', '')  # GSSでURLが変わっていれば送信先も更新（reload_config()と同じ再同期）
+        _set_web_endpoint()
         config, TIMEOUT_MAIN, WARNING_AMPERAGE, CONTRACT_AMPERAGE = cnfg.set_config(config)
         _send_config_report()  # 設定値(契約アンペア)をGASへ1回だけ通知。URL未設定なら no-op。
         set_instance(config)
@@ -1117,18 +1131,17 @@ if __name__ == '__main__':
             if hist_retry_queue:
                 send_web_hist_retry_one()
 
-            # 【WEB_RECOVERY】 ⓐ自己復旧（検知のみ・reset実行は担保＝まだ呼ばない）：
-            # 履歴取得後にweb送信(inst/cuml)が連続でMemoryError＝ヒープ断片化でGAS盲目化。
-            # ambient成功が既存ウォッチドッグ(retries)を無効化するため別系統で検知する。
-            # まず実機で「正しいタイミングでフラグが立つか」をログ検証し、確認後にreset()を有効化する。
+            # 【WEB_RECOVERY】 ⓐ自己復旧：履歴取得後にweb送信(inst/cuml)が連続でMemoryError＝
+            # ヒープ断片化でGAS盲目化。ambient成功が既存ウォッチドッグ(retries)を無効化するため
+            # 別系統で検知する。実機でMemoryError発生を直接確認済み（2026-08-07、longcapture）。
+            # 検知条件成立でreset()を実行し、断片化した状態からの自己復旧を図る。
             if web_oom_count == 0:
                 web_recovery_pending = False
             elif (hist_flag[data_period] and web_oom_count >= WEB_OOM_RESET
                   and not web_recovery_pending):
                 web_recovery_pending = True
-                # H1.5:logger.critical('[WEB_] OOM x%d -> recovery TRIGGER (flag only, reset deferred)',
-                                # H1.5:web_oom_count)
-                # reset()  # ← 実機でフラグ動作を確認後に有効化する（根治はarray.array化＝別途）
+                print('[WEB_] OOM x%d -> recovery TRIGGER, resetting' % web_oom_count)
+                reset()
 
             # 【PING】 動作確認：Ping every 1 hour
             if (utime.time() - ping_time) >= (60 * 60):

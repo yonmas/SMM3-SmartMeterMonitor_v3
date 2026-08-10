@@ -1,3 +1,8 @@
+# SMM3 親機 Ambient対応版（子機あり）：smm3_main_web.py + Ambient送信。
+# smm3_main_web.py との差分：Ambient送信（send_ambient()とその周辺、軽量版ambient_lite.py使用）。
+# 子機(ESP-NOW)・GAS(Web)・Ambientを同時に動かす構成のため、メモリ制約によりバックフィル送信の
+# 成功率は60〜78%程度に留まる（子機を使わないambient/smm3_main_web_amb_mini.pyなら100%）。
+# 詳しくは ambient/README.md、詳細はsend_ambient()直上のコメント参照。
 from m5stack import lcd, btnA, btnB
 from machine import Timer, reset, WDT, reset_cause
 import array
@@ -64,6 +69,7 @@ config = {
 logger = None               # Logger object
 logger_name = 'MAIN'        # Logger name
 bp35a1 = None               # BPA35A1 object
+ambient_client = None       # Ambient instance
 ipv6_addr = None
 coefficient = None
 unit = None
@@ -83,7 +89,7 @@ checkWiFi_timer = Timer(0)
 indicator_timer = Timer(3)
 
 # 履歴データを取得する期間（日）
-data_period = 13            # 何日前までのデータを参照するか
+data_period = 35            # 何日前までのデータを参照するか
 
 # Colormap (tab10)
 colormap = (
@@ -346,7 +352,7 @@ def check_timeout(inst_time):
 
 # 【config】　インスタンスの設定
 def set_instance(config):
-    global bp35a1, logger, calc_charge_func
+    global bp35a1, ambient_client, logger, calc_charge_func
 
     status('Create objects', uncolor)
     bp35a1 = BP35A1(config['B_ID'],
@@ -360,6 +366,13 @@ def set_instance(config):
     # H1.5:logger.info('[INIT] BP35A1 config: (%s, %s, %s)', config['B_ID'],
                 # H1.5:config['B_PASSWORD'], config['COLLECT_CALENDAR'])
 
+    # Ambient のアカウント設定
+    if (config['A_ID'] != '*') and (config['A_KEY'] != '*'):
+        import ambient_lite
+        ambient_client = ambient_lite.Ambient(config['A_ID'], config['A_KEY'])
+        # H1.5:logger.info('[INIT] Ambient config: (%s, %s)',
+                    # H1.5:config['A_ID'], config['A_KEY'])
+
     calc_instance = CalcCharge(
         config['BASE'],    # 基本料金
         config['RATE1'],   # 1段料金
@@ -367,7 +380,7 @@ def set_instance(config):
         config['RATE3'],   # 3段料金
         config['NENCHO'],  # 燃料費調整単価
         config['SAIENE'],  # 再エネ発電賦課金単価
-        1                  # 前日までの集計
+        0                  # 当日を含む集計
     )
 
     try:
@@ -444,10 +457,7 @@ def send_cumul():
         _created, _e_energy = bp35a1.get_cumul_e_energy()
         _created_date = _created[:10]
         _created_day = day_from_date(_created_date)  # 曜日番号の取得
-
-        _days_ago = data_period
-        _col = date_of_days_ago(_created_date, _days_ago).split('/')
-        _collect = '****-{:02d}-{:02d}'.format(int(_col[0]), int(_col[1]))
+        _collect, _days_ago = bp35a1.get_collect_date()
 
         _hourly_power = [[0 for i in range(24)] for j in range(_days_ago + 1)]
         if hist_flag[_days_ago] is True:  # 料金計算期間のデータを取得済みなら〜
@@ -509,6 +519,34 @@ def send_inst():
         pass
 
     return _wattage, _amperage, result
+
+
+# 【send】 Ambientデータ送信：Send every 30 seconds
+# 経緯：2026-07-06にe2ba83eでAmbient送信を一旦撤去した。撤去理由は耐久ログで「[NET]amb直後の
+# 無限ハング」（例外もreturnも出ない）が繰り返し観測されたこと。原因は外部ライブラリ ambient.py
+# の send() が MicroPython分岐(self.micro=True)で timeout引数を urequests.post() へ渡し忘れて
+# いるバグ（2026-08-05調査で特定）。この版では、そのバグを踏まない自前の軽量クライアント
+# ambient_lite.py（usocket+settimeoutで自前HTTP POST、静的メモリも928→304バイトに削減）に
+# 差し替えることで復活させている。smm3_main_web.py には定常運転入り後のハードWDT(120秒)も
+# あるため、万一未知のハングが起きても自動リセットで復帰する二重の安全策になっている。
+def send_ambient():
+
+    result = False
+
+    print('[NET]amb')  # [NET_DIAG] WDTハングの犯人特定用マーカー（一時・特定後に削除）
+    try:
+        if ambient_client:
+            # ambient_liteのsend()はTrue/Falseを返す（.status_code属性は持たない）
+            result = ambient_client.send({'d1': amperage,
+                                          'd2': wattage,
+                                          'd3': monthly_e_energy,
+                                          'd4': charge})
+
+    except Exception as e:
+        print('[AMBIENT]', e)
+        pass
+
+    return result
 
 
 # 【send】 GASへのPOSTの単一チョークポイント。無応答での無限ブロック（=例外もreturnも出ず
@@ -845,7 +883,7 @@ if __name__ == '__main__':
 
         lcd.clear()
         lcd.orient(orient)
-        status('Welcome to SMM3-lite !', uncolor)
+        status('Welcome to SMM3 !', uncolor)
 
         # 定数の読み込み（ファイル、Googleスプレッドシート）
         # ファイル読込(ローカルI/Oのみ・ネットワーク無し)の直後に GAS送信先を確定してboot報告を送る。
@@ -926,6 +964,7 @@ if __name__ == '__main__':
         hist_time = [utime.time() - 1200] * (data_period + 1)  # HIST タイマー
         cumul_time = utime.time() - 1200  # CUML タイマー
         inst_time = utime.time() - 1200  # INST タイマー
+        ambient_time = utime.time() - 1200  # Ambient タイマー
         ping_time = utime.time() - 1200  # ping タイマー
         web_inst_time = utime.time() - 1200  # Web 瞬時電力 タイマー
         
@@ -1124,6 +1163,15 @@ if __name__ == '__main__':
                     retries += 1
 
             check_timeout(inst_time)  # スマートメーターからのデータのタイムアウト判定
+
+            # 【AMBIENT】 Ambientデータ送信：Send every config['A_INTERVAL'] seconds
+            if (utime.time() - ambient_time) >= config['A_INTERVAL']:
+                result = send_ambient()
+                ambient_time = utime.time()
+                if result is True:
+                    retries = 0
+                else:
+                    retries += 1
 
             # 【WEB_INST】 Web ダッシュボード(GAS)へ瞬時電力送信：Send every WEB_INST_INTERVAL seconds
             if (utime.time() - web_inst_time) >= WEB_INST_INTERVAL:

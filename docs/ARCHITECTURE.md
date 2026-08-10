@@ -185,19 +185,30 @@ finally: reset()   ← どんな未捕捉例外でも「再起動」に落とす
 
 ### GAS側の受け（gas_dashboard/）
 
-- `doPost` は `type` で分岐: `inst`（Script Propertiesのみ）/ `cuml`（Sheetに1行追記）/
-  `backfill`（同一時刻の行だけ差し替え）。
+- `doPost` は `type` で分岐: `inst`（Script Propertiesへ最新値保存＋`InstLog`シートへ1行追記、
+  直近1週間分のみローリング保持）/ `cuml`（`History`シートに1行追記、無期限保持）/
+  `backfill`（同一時刻の行だけ差し替え）/ `boot`（再起動ログ）/ `config`（契約アンペア表示用）。
+  各typeのJSONフィールド詳細は [`gas_dashboard/README.md`](../gas_dashboard/README.md) の
+  「プロトコル仕様」参照。
+- **backfillのペイロード形式**（2026-08-09〜）：`{created:[...], e_energy:[...]}` の配列2本
+  （同じ長さ、同じ添字が対応）。旧形式 `{points:[{created,e_energy},...]}` からJSONサイズ
+  約43%削減のため変更。旧形式のリクエストは受け付けない。
 - **LockServiceで直列化** — GASはdoPostの同時実行を許すため、cumlとbackfillが重なると
-  「読み込み→削除→再書き込み」を踏むbackfill側がデータを壊しうる。
+  「読み込み→削除→再書き込み」を踏むbackfill側がデータを壊しうる。`waitLock()`は`try`の
+  内側で呼び、タイムアウト時も確実に`finally`で`releaseLock()`に到達させる。
 - **backfillは時刻単位で上書き** — 日付単位だと、同じ日を半日×2チャンクで送ったとき
   後のチャンクが前のチャンクを消す。
-- **無音検知** — 全doPostで `lastSeenAt` を更新し、5分毎トリガで600秒途絶をメール通知。
-  閾値600秒は「単発再起動（2〜3分）では誤検知しない」値。監視のみで復旧アクションはしない。
+- **無音検知** — 全doPostで `lastSeenAt` を更新し、ダッシュボード表示時に最終受信からの
+  経過秒数を計算、600秒（閾値`STALE_SEC`）を超えると赤画面表示。定期トリガやメール通知は
+  持たない（匿名Webアプリからは`MailApp`/`ScriptApp`が権限エラーになり、承認作業を全利用者に
+  強いる割に画面表示以上の価値が無いため2026-08-05に撤去）。閾値600秒は「単発再起動
+  （2〜3分）では誤検知しない」値。監視のみで復旧アクションはしない。
 - `d>=1` の過去日は e_energy==0 もスキップせず送る（メーター交換等の欠測をGAS側で0埋め
   として扱い、差分計算を特別扱いしないため）。`d==0` の0だけは「未計測」なので送らない。
 - **デプロイの罠**: Code.js等を変更しても、GASで「新しいデプロイ」を作成しない限り
   親機が叩く `/exec` URLの動作は変わらない（テストは `/dev` URL）。また新デプロイでURLが
-  変わった場合は親機の `WEB_GAS_URL`（smm3_main_web.py冒頭にハードコード）の更新が必要。
+  変わった場合は親機の `config['WEB_GAS_URL']`（`config_main.json`、または設定用GSSの
+  `WEB_GAS_URL`行）の更新が必要（コードへの直書きではない）。
 
 ## 6. 子機（ATOM S3 / CircuitPython）の設計
 

@@ -1,8 +1,14 @@
+# SMM3 親機 lite版 Ambient対応版（子機なし）：smm3-lite_main_web_amb.py から子機(ESP-NOW)送受信を省いた版。
+# 子機(ESP-NOW)とGAS(Web)送信＋Ambient送信を同時に動かすと、ESP-NOWのメモリ占有分だけ
+# バックフィル送信の成功率が下がる（実測：子機あり60〜78% → 子機なし100%、2026-08-09検証、通常版での結果）。
+# 子機を使わない運用（親機単体、または子機以外の方法で電力を確認する運用）であれば、
+# ESP-NOW関連の送受信を丸ごと省くことでこの制約を回避できる。詳しくは ambient/README.md 参照。
+# smm3-lite_main_web_amb.py との差分は espnow.init()・espnow.broadcast()・espnow.recv_data()と
+# 子機の履歴リクエスト(REQ)応答処理・未使用だったsend_unit()の削除のみ。GAS送信・Ambient送信・
+# フリーズ対策・スマートメーター履歴取得ロジックは無変更。
 from m5stack import lcd, btnA, btnB
 from machine import Timer, reset, WDT, reset_cause
 import array
-import binascii
-import espnow
 import gc
 import logging
 import math
@@ -64,6 +70,7 @@ config = {
 logger = None               # Logger object
 logger_name = 'MAIN'        # Logger name
 bp35a1 = None               # BPA35A1 object
+ambient_client = None       # Ambient instance
 ipv6_addr = None
 coefficient = None
 unit = None
@@ -341,12 +348,11 @@ def check_timeout(inst_time):
         data_mute = True
         draw_wattage(wattage)
         draw_amperage(amperage)
-        espnow.broadcast(data=str('M:TOUT'))  # ESP NOW で timeout を子機に通知
 
 
 # 【config】　インスタンスの設定
 def set_instance(config):
-    global bp35a1, logger, calc_charge_func
+    global bp35a1, ambient_client, logger, calc_charge_func
 
     status('Create objects', uncolor)
     bp35a1 = BP35A1(config['B_ID'],
@@ -359,6 +365,13 @@ def set_instance(config):
                     log_level=config['LOG_LEVEL'])
     # H1.5:logger.info('[INIT] BP35A1 config: (%s, %s, %s)', config['B_ID'],
                 # H1.5:config['B_PASSWORD'], config['COLLECT_CALENDAR'])
+
+    # Ambient のアカウント設定
+    if (config['A_ID'] != '*') and (config['A_KEY'] != '*'):
+        import ambient_lite
+        ambient_client = ambient_lite.Ambient(config['A_ID'], config['A_KEY'])
+        # H1.5:logger.info('[INIT] Ambient config: (%s, %s)',
+                    # H1.5:config['A_ID'], config['A_KEY'])
 
     calc_instance = CalcCharge(
         config['BASE'],    # 基本料金
@@ -411,23 +424,6 @@ def reload_config(config):
     # cumul_flag = False
 
 
-# 【send】 'UNIT' 積算電力量-[単位x係数]のリクエストに応答
-def send_unit(unit_flag, unit_count):
-    if unit_flag is False:
-        espnow.broadcast(data=str('M:UNT=' + str(UNIT)))
-        unit_flag = True
-        # H1.5:logger.info('[UNIT] -> %.1f', UNIT)
-    else:
-        unit_count += 1
-        # H1.5:logger.debug('[UNIT] Skip UNIT Request: counter = %d', unit_count)
-        if unit_count >= 10:  # 最大リトライ回数
-            unit_count = 0
-            unit_flag = False
-            # H1.5:logger.debug('[UNIT] Reset UNIT Counter')
-
-    return unit_flag, unit_count
-
-
 # 【send】 積算電力量　取得 ＆ 表示 & 子機送信
 def send_cumul():
     # H1.5:logger.debug('[CUML] == Monthly e-Energy & Monthly Charge ==')
@@ -465,13 +461,7 @@ def send_cumul():
             del _hourly_power
             gc.collect()
 
-        # 子機送信
-        CUML = str('M:CUML' + str(_collect) + '/' + str(_created) + '/' + str(_e_energy) + '/'
-                   + str(_monthly_e_energy) + '/' + str(_charge))
-        espnow.broadcast(data=CUML)
-        # H1.5:logger.info('[CUML] -> [%s]', str(CUML))
-
-        # Web ダッシュボード(GAS)へも同じタイミングで送信
+        # Web ダッシュボード(GAS)へ送信
         send_web_cuml(_collect, _created, _e_energy, _monthly_e_energy, _charge)
 
         result = True
@@ -495,10 +485,8 @@ def send_inst():
         # 取得
         (_wattage, _amperage) = bp35a1.get_instantaneous_data()
 
-        # 子機送信：瞬時電力、瞬時電力発信
+        # データ型の検証（子機送信は行わないが、異常値の検出は維持する）
         if isinstance(_wattage, int) and isinstance(_amperage, float):
-            espnow.broadcast(data=str('M:INST' + str(_wattage) + '/' + str(_amperage)))
-            # H1.5:logger.info('[INST] -> [%s , %s]', str(_wattage), str(_amperage))
             result = True
 
         else:
@@ -509,6 +497,34 @@ def send_inst():
         pass
 
     return _wattage, _amperage, result
+
+
+# 【send】 Ambientデータ送信：Send every 30 seconds
+# 経緯：2026-07-06にe2ba83eでAmbient送信を一旦撤去した。撤去理由は耐久ログで「[NET]amb直後の
+# 無限ハング」（例外もreturnも出ない）が繰り返し観測されたこと。原因は外部ライブラリ ambient.py
+# の send() が MicroPython分岐(self.micro=True)で timeout引数を urequests.post() へ渡し忘れて
+# いるバグ（2026-08-05調査で特定）。この版では、そのバグを踏まない自前の軽量クライアント
+# ambient_lite.py（usocket+settimeoutで自前HTTP POST、静的メモリも928→304バイトに削減）に
+# 差し替えることで復活させている。smm3_main_web.py には定常運転入り後のハードWDT(120秒)も
+# あるため、万一未知のハングが起きても自動リセットで復帰する二重の安全策になっている。
+def send_ambient():
+
+    result = False
+
+    print('[NET]amb')  # [NET_DIAG] WDTハングの犯人特定用マーカー（一時・特定後に削除）
+    try:
+        if ambient_client:
+            # ambient_liteのsend()はTrue/Falseを返す（.status_code属性は持たない）
+            result = ambient_client.send({'d1': amperage,
+                                          'd2': wattage,
+                                          'd3': monthly_e_energy,
+                                          'd4': charge})
+
+    except Exception as e:
+        print('[AMBIENT]', e)
+        pass
+
+    return result
 
 
 # 【send】 GASへのPOSTの単一チョークポイント。無応答での無限ブロック（=例外もreturnも出ず
@@ -800,10 +816,6 @@ def get_hist_data():
     indicator_timer.deinit()
     indicator_timer.init(period=200, mode=indicator_timer.PERIODIC, callback=draw_indicator)
 
-    # 親機起動を通知
-    espnow.broadcast(data='M:BOOT')
-    utime.sleep(0.1)
-
     beep()
 
 
@@ -838,7 +850,6 @@ if __name__ == '__main__':
                 utime.sleep(1)
                 _t += 1
         wifiCfg.wlan_ap.active(True)
-        espnow.init(0)
 
         # Start checking the WiFi connection
         checkWiFi_timer.init(period=60 * 1000, mode=checkWiFi_timer.PERIODIC, callback=checkWiFi)
@@ -890,11 +901,6 @@ if __name__ == '__main__':
         # H1.5:logger.info('[INIT] Connected. BP35A1: (%s, %s, %s, %s, %s)',
                     # H1.5:channel, pan_id, mac_addr, lqi, ipv6_addr)
 
-        # 親機起動を通知
-        espnow.broadcast(data='M:BOOT')
-        utime.sleep(0.1)
-        # espnow.broadcast(data=str('M:UNT=' + str(UNIT)))
-
         status('== Start monitoring ==', uncolor)
         utime.sleep(1)
 
@@ -908,10 +914,6 @@ if __name__ == '__main__':
         cumul_flag = False
 
         UNIT = unit * coefficient
-        
-        # << UNIT を子機に送信する場合
-        unit_flag = True  # << UNIT を子機に送信する場合はコメントアウト
-        unit_count = 0
 
         # 表示値初期値
         wattage = 0
@@ -926,6 +928,7 @@ if __name__ == '__main__':
         hist_time = [utime.time() - 1200] * (data_period + 1)  # HIST タイマー
         cumul_time = utime.time() - 1200  # CUML タイマー
         inst_time = utime.time() - 1200  # INST タイマー
+        ambient_time = utime.time() - 1200  # Ambient タイマー
         ping_time = utime.time() - 1200  # ping タイマー
         web_inst_time = utime.time() - 1200  # Web 瞬時電力 タイマー
         
@@ -1017,49 +1020,6 @@ if __name__ == '__main__':
                     retries += 1
 
             check_timeout(inst_time)  # スマートメーターからのデータのタイムアウト判定
-            
-            # 【RCEV】 子機からデータを受信(ESP NOW)
-
-            d = espnow.recv_data()
-            
-            if (len(d[2]) > 0):
-                key = str(d[2].decode().strip())
-                # H1.5:logger.info('[RECV] <- Key = [%s]', key)
-
-                # # 【UNIT】 UNIT を子機に送信する場合
-                # # 'UNIT' 積算電力量-[単位x係数]のリクエストに応答
-                # if key.startswith('UNIT'):
-                #     unit_flag, unit_count = send_unit(unit_flag, unit_count)
-
-                # 【HIST】 'REQ' 積算電力量-履歴データのリクエストに応答
-                if key.startswith('REQ'):
-                    id = int(key[3:5])
-                    
-                    if id == 0:
-                        cumul_flag = False
-                        cumul_time = utime.time() - 1200
-
-                    # 指定秒数以内の重複リクエストはスキップ
-                    if hist_flag[id] is True and utime.time() - hist_time[id] > 30:
-                        _send_data = ''
-                        for k in range(0, 49):
-                            _send_data += '{:08X}'.format(hist_data[id][k])
-                        send_data = (bytes('M:ID{:02}{}{:5}'
-                                           .format(id, hist_created[id], hist_date[id]), 'UTF-8')
-                                     + binascii.unhexlify(_send_data + '00'))
-                        espnow.broadcast(data=send_data)
-                        hist_time[id] = utime.time()
-
-                        # H1.5:logger.info('[HIST] -> [(%d) %s [%s %.1f - %.1f : %.1f]]',
-                                    # H1.5:id, hist_created[id],
-                                    # H1.5:hist_date[id],
-                                    # H1.5:hist_data[id][0] * UNIT,
-                                    # H1.5:hist_data[id][47] * UNIT,
-                                    # H1.5:hist_data[id][48] * UNIT)
-                        # H1.5:logger.debug('[HIST] -> Raw = %s', hist_data[id])
-                        # logger.debug('[HIST] -> [%d, %s]', id, binascii.hexlify(send_data).decode('utf-8'))
-
-                check_timeout(inst_time)  # スマートメーターからのデータのタイムアウト判定
 
             # 【HIST】 履歴データを順に取得する
             if hist_flag[hist_day] is False:
@@ -1125,6 +1085,15 @@ if __name__ == '__main__':
 
             check_timeout(inst_time)  # スマートメーターからのデータのタイムアウト判定
 
+            # 【AMBIENT】 Ambientデータ送信：Send every config['A_INTERVAL'] seconds
+            if (utime.time() - ambient_time) >= config['A_INTERVAL']:
+                result = send_ambient()
+                ambient_time = utime.time()
+                if result is True:
+                    retries = 0
+                else:
+                    retries += 1
+
             # 【WEB_INST】 Web ダッシュボード(GAS)へ瞬時電力送信：Send every WEB_INST_INTERVAL seconds
             if (utime.time() - web_inst_time) >= WEB_INST_INTERVAL:
                 send_web_inst(wattage, amperage, data_mute)
@@ -1135,9 +1104,7 @@ if __name__ == '__main__':
                 send_web_hist_retry_one()
 
             # 【WEB_RECOVERY】 ⓐ自己復旧：履歴取得後にweb送信(inst/cuml)が連続でMemoryError＝
-            # ヒープ断片化でGAS盲目化。ambient成功が既存ウォッチドッグ(retries)を無効化するため
-            # 別系統で検知する。実機でMemoryError発生を直接確認済み（2026-08-07、longcapture）。
-            # 検知条件成立でreset()を実行し、断片化した状態からの自己復旧を図る。
+            # ヒープ断片化でGAS盲目化。検知条件成立でreset()を実行し、自己復旧を図る。
             if web_oom_count == 0:
                 web_recovery_pending = False
             elif (hist_flag[data_period] and web_oom_count >= WEB_OOM_RESET

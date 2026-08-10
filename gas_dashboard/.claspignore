@@ -4,3 +4,7 @@ netlify_shell/**
 
 # ドキュメント類もGASには不要
 README.md
+
+# InstLogのテストデータ/実データ切替UI付きの開発用控え（本番Dashboard.htmlからは撤去済み）。
+# GASプロジェクトには不要なローカル専用ファイル
+Dashboard.dev.html
