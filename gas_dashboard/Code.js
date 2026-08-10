@@ -15,15 +15,6 @@ function isSampleDeployment() {
   return ScriptApp.getService().getUrl().indexOf(SAMPLE_DEPLOYMENT_ID) !== -1;
 }
 
-// ---- 一時共有デプロイ(smm3-share-003e7a3f)用ガード ----
-// 知人への一時公開用。数値・週/月等は実データのまま見せるが、瞬時グラフ(InstLog)だけは
-// 詳細な生活パターンが読み取れてしまうため、サンプルと同じくテストデータに固定する。
-// 判定方法はサンプルと同じくデプロイURL自体（クエリでは変更不可）。
-var TEMP_SHARE_DEPLOYMENT_ID = 'AKfycbyE0jD9aImaDTjGrvQ8hOl-VSUqqGMWWJsRBajXCMYovdC4nuSFFlugsWcjZjjqTQzm';
-function isTempShareDeployment() {
-  return ScriptApp.getService().getUrl().indexOf(TEMP_SHARE_DEPLOYMENT_ID) !== -1;
-}
-
 // ---- 状態監視(無音検知)設定 ----
 var STALE_SEC = 600;    // この秒数データが途絶えたら「異常(stale)」＝フリーズ/再起動連発/オフラインの疑い
                         // inst=30秒毎/cuml=10分毎なので、単発の再起動(~2-3分)では誤検知しない値
@@ -42,12 +33,12 @@ function doGet(e) {
       .setMimeType(ContentService.MimeType.JSON);
   }
   // InstLogグラフ用。source=test は負荷テスト専用のInstLogTestシート（20160行の合成データ、
-  // seedTestInstLog()で生成）、それ以外は本番InstLogの実データ。サンプルデプロイ／一時共有
-  // デプロイでは、クエリのsource指定に関わらず常にテストデータを返す（実データへは到達させない）。
+  // seedTestInstLog()で生成）、それ以外は本番InstLogの実データ。サンプルデプロイでは
+  // クエリのsource指定に関わらず常にテストデータを返す（実データへは到達させない）。
   // tail=N を付けると末尾N行だけ（＝初期表示の高速化用）、無指定なら全件を返す
   if (e.parameter.action === 'instlog') {
     var tail = e.parameter.tail ? parseInt(e.parameter.tail, 10) : null;
-    var useTest = sample || isTempShareDeployment() || e.parameter.source === 'test';
+    var useTest = sample || e.parameter.source === 'test';
     var result = useTest ? readInstLogTestRows(tail) : readInstLogRows(tail);
     return ContentService.createTextOutput(JSON.stringify(result))
       .setMimeType(ContentService.MimeType.JSON);
