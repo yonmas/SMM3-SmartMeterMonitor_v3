@@ -31,6 +31,12 @@
     }
     @keyframes hbpulse { 0%,100% { opacity: 1; } 50% { opacity: .5; } }
     body.alert-stale #healthBanner { display: block; }
+    /* サンプル公開デプロイ専用の常時バナー（警告ではないのでパルスさせず、パレットのprimaryで
+       落ち着いた色にする。alert-staleの赤バナーとは別物として視覚的に区別する） */
+    .sample-banner {
+      text-align: center; font-weight: bold; padding: 10px 8px; font-size: 13px;
+      background: var(--primary); color: var(--on-primary);
+    }
     .tabs { display: flex; position: sticky; top: 0; background: var(--bg); }
     .tabs button {
       flex: 1; padding: 14px 0; background: var(--panel); color: var(--text-secondary);
@@ -200,6 +206,7 @@
   </style>
 </head>
 <body>
+  <? if (isSample) { ?><div class="sample-banner">📊 サンプル表示（固定データです。実際の稼働状況ではありません）</div><? } ?>
   <div id="healthBanner"></div>
   <div class="tabs">
     <button class="active" data-page="p-simple">瞬時</button>
@@ -278,7 +285,7 @@
     <div class="set-row">
       <label class="set-label" for="setWarnAmp">警告アンペア（A）</label>
       <div class="set-desc">超過時に瞬時画面の数値が赤くなります。</div>
-      <input class="set-input narrow" id="setWarnAmp" type="number" min="1" step="1" inputmode="numeric">
+      <input class="set-input narrow" id="setWarnAmp" type="number" min="1" step="1" inputmode="numeric"<? if (isSample) { ?> readonly<? } ?>>
     </div>
 
     <div class="set-row">
@@ -300,6 +307,9 @@
     // GASのWebアプリURLはscript.googleusercontent.comへリダイレクトされるため、
     // window.location.hrefから組み立てると正しいエンドポイントにならない。固定で持つ。
     var EXEC_URL = <?!= JSON.stringify(execUrl) ?>;
+    // サンプル公開デプロイ（smm3-sample）かどうか。判定はCode.js側のisSampleDeployment()が
+    // デプロイURL自体で行うので、こちらは表示上の分岐（設定の編集不可・バナー表示等）専用
+    var IS_SAMPLE = <?!= isSample ? 'true' : 'false' ?>;
 
     // ---- カラーパレット ----
     // 「主要4色（背景/Primary/Success/Highlight）＋固定のDanger」という考え方。Dangerは
@@ -520,15 +530,21 @@
         });
     }
 
-    document.getElementById('setWarnAmp').addEventListener('change', function () {
-      settingsDirty = true;
-    });
-    document.getElementById('setWarnAmp').addEventListener('blur', saveSettings);
-    // 他アプリへの切替・画面ロック・タブの切替等、ページが非表示になる瞬間は常に検知できる
-    // （focus/blurの挙動に依存しないため、こちらの方が確実）
-    document.addEventListener('visibilitychange', function () {
-      if (document.hidden) saveSettings();
-    });
+    // サンプル公開デプロイでは自動保存の配線自体を行わない（入力欄はreadonly済みだが、
+    // 一部ブラウザのnumber inputスピナーはreadonlyでも動く既知の癖があるため、二重に防ぐ）
+    if (!IS_SAMPLE) {
+      document.getElementById('setWarnAmp').addEventListener('change', function () {
+        settingsDirty = true;
+      });
+      document.getElementById('setWarnAmp').addEventListener('blur', saveSettings);
+      // 他アプリへの切替・画面ロック・タブの切替等、ページが非表示になる瞬間は常に検知できる
+      // （focus/blurの挙動に依存しないため、こちらの方が確実）
+      document.addEventListener('visibilitychange', function () {
+        if (document.hidden) saveSettings();
+      });
+    } else {
+      document.getElementById('setMsg').textContent = 'サンプル表示のため変更できません';
+    }
 
     // ---- 赤画面アラート音 ----
     // ブラウザの自動再生制限により、ページ読み込み後に一度もユーザー操作（クリック/タップ）が

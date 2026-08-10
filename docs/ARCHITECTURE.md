@@ -209,6 +209,14 @@ finally: reset()   ← どんな未捕捉例外でも「再起動」に落とす
   親機が叩く `/exec` URLの動作は変わらない（テストは `/dev` URL）。また新デプロイでURLが
   変わった場合は親機の `config['WEB_GAS_URL']`（`config_main.json`、または設定用GSSの
   `WEB_GAS_URL`行）の更新が必要（コードへの直書きではない）。
+- **サンプル公開デプロイ（`smm3-sample`、2026-08-10〜）**：README等に恒久リンクする公開用デプロイは、
+  同一スクリプト・同一データストア（PROP/History/InstLogシート）を共有する別デプロイとして作る。
+  クエリパラメータでの分岐は**使わない**（URLからパラメータを外されると実データが素通りする）。
+  代わりに `Code.js` の `isSampleDeployment()` が `ScriptApp.getService().getUrl()`
+  （そのデプロイ自身のURL、Google側が発行しクライアントからは偽装不能）を固定デプロイIDと
+  比較して判定し、一致すれば `action=data`/`instlog`/`saveSettings` すべてで強制的に
+  `SampleData.js` の固定スナップショット・テストデータ側に倒す。本番デプロイのIDとは
+  一致しないため、この仕組みを追加しても本番の挙動には影響しない。
 
 ## 6. 子機（ATOM S3 / CircuitPython）の設計
 

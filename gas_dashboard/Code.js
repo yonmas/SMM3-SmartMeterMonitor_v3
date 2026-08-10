@@ -5,6 +5,16 @@
 
 var PROP = PropertiesService.getScriptProperties();
 
+// ---- サンプル公開デプロイ用ガード ----
+// 「smm3-sample」として恒久公開するデプロイのIDをここに固定する。クエリパラメータ等の
+// クライアント指定値ではなく、Google側が発行するデプロイURL自体（ScriptApp.getService().getUrl()）
+// で判定するため、URLからパラメータを外しても実データ（PROP/Historyシート、本番と共有）には
+// 一切到達できない。本番デプロイはこのIDと一致しないので影響を受けない。
+var SAMPLE_DEPLOYMENT_ID = 'AKfycbyh1aHjcnLZEFN9zbYsMYU3y1akYv9cBDS8DMpXAEoK8TSCm-pTlugXkCiTltrDiQeS';
+function isSampleDeployment() {
+  return ScriptApp.getService().getUrl().indexOf(SAMPLE_DEPLOYMENT_ID) !== -1;
+}
+
 // ---- 状態監視(無音検知)設定 ----
 var STALE_SEC = 600;    // この秒数データが途絶えたら「異常(stale)」＝フリーズ/再起動連発/オフラインの疑い
                         // inst=30秒毎/cuml=10分毎なので、単発の再起動(~2-3分)では誤検知しない値
@@ -15,31 +25,38 @@ var DEFAULT_WARN_AMP = 30;  // 警告アンペアの初期値。設定用GSSの 
                             // 以降はダッシュボードの設定ページで独立して変更する（シートとは同期しない）
 
 function doGet(e) {
+  // サンプル公開デプロイかどうかは常にデプロイURL自体で判定（クエリでは変えられない、上記参照）
+  var sample = isSampleDeployment();
+
   if (e.parameter.action === 'data') {
-    return ContentService.createTextOutput(JSON.stringify(getDashboardData()))
+    return ContentService.createTextOutput(JSON.stringify(sample ? SAMPLE_SNAPSHOT : getDashboardData()))
       .setMimeType(ContentService.MimeType.JSON);
   }
   // InstLogグラフ用。source=test は負荷テスト専用のInstLogTestシート（20160行の合成データ、
-  // seedTestInstLog()で生成）、それ以外は本番InstLogの実データ。まだ実験段階の口なので
-  // ダッシュボード側にはUIから明示的に切り替えるトグルを用意している。
+  // seedTestInstLog()で生成）、それ以外は本番InstLogの実データ。サンプルデプロイでは
+  // クエリのsource指定に関わらず常にテストデータを返す（実データへは絶対に到達させない）。
   // tail=N を付けると末尾N行だけ（＝初期表示の高速化用）、無指定なら全件を返す
   if (e.parameter.action === 'instlog') {
     var tail = e.parameter.tail ? parseInt(e.parameter.tail, 10) : null;
-    var result = e.parameter.source === 'test' ? readInstLogTestRows(tail) : readInstLogRows(tail);
+    var useTest = sample || e.parameter.source === 'test';
+    var result = useTest ? readInstLogTestRows(tail) : readInstLogRows(tail);
     return ContentService.createTextOutput(JSON.stringify(result))
       .setMimeType(ContentService.MimeType.JSON);
   }
   // 設定の保存。既存の action=data と同じGETの流儀に揃える（Netlifyのiframe越しでも確実に通る）。
   // URLを知っていれば誰でも変更できるが、変えられて困る値が無いため認証は設けていない。
+  // サンプルデプロイでは保存ボタン自体をUI側で非表示にしているが、直叩き対策として
+  // ここでも何もせず現在の（固定）設定を返すだけにする。
   if (e.parameter.action === 'saveSettings') {
-    return ContentService.createTextOutput(JSON.stringify(saveSettings(e.parameter)))
+    return ContentService.createTextOutput(JSON.stringify(sample ? SAMPLE_SNAPSHOT.settings : saveSettings(e.parameter)))
       .setMimeType(ContentService.MimeType.JSON);
   }
   var tmpl = HtmlService.createTemplateFromFile('Dashboard');
-  tmpl.data = getDashboardData();
+  tmpl.data = sample ? SAMPLE_SNAPSHOT : getDashboardData();
   tmpl.execUrl = ScriptApp.getService().getUrl();
+  tmpl.isSample = sample;
   return tmpl.evaluate()
-    .setTitle('SMM3 Dashboard')
+    .setTitle(sample ? 'SMM3 Dashboard (Sample)' : 'SMM3 Dashboard')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
