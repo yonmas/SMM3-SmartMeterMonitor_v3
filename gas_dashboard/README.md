@@ -112,6 +112,37 @@ GASの操作に不慣れな方向けに、画面操作レベルで手順を書�
 自動的に埋まっていきます。履歴用のスプレッドシートは初回のデータ受信時に自動作成されます
 （GASプロジェクトと同じGoogleアカウントのGoogleドライブ内）。
 
+ここでの動作確認だけを目的に開くのはこのままで構いませんが、**日常的に見る用途では
+このURLを直接使うのはおすすめしません**。理由は次の「6. Netlifyで公開する」を参照してください。
+
+## 6. Netlifyで公開する（推奨）
+
+`/exec` を直接開くと、ブラウザのタブに「このアプリケーションは Google Apps Script の
+ユーザーによって作成されたものです」という警告バナーが**毎回**表示されます（GAS製の
+未検証Webアプリに対する固定表示で、消せません）。またタブアイコンもGoogleの汎用アイコンの
+ままで、`Dashboard.html` 側で `favicon` を指定しても反映されません（`script.google.com` →
+`script.googleusercontent.com` へのリダイレクト/サンドボックス経由で配信される都合上の制約。
+`HtmlService.setFaviconUrl()` という専用APIもありますが、SVGを渡すと`doGet`が例外を起こして
+画面全体が表示できなくなるため使えません）。
+
+これを解消するために、[`netlify_shell/`](netlify_shell/) にある最小限の静的ページ
+（`index.html` が `/exec` をiframeで表示するだけの「外枠」）を
+[Netlify](https://www.netlify.com/) 等の無料静的ホスティングにデプロイすることを
+**標準の運用方法として推奨します**。手順は次の通りです。
+
+1. `netlify_shell/index.html` を開き、`<iframe src="...">` の
+   `https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec` の部分を、
+   自分の `/exec` URL（上記「3. デプロイする」で控えたもの）に書き換える。
+2. [app.netlify.com](https://app.netlify.com/) にログインし、`netlify_shell/` フォルダを
+   そのままドラッグ＆ドロップでデプロイ（ビルド不要の静的サイトなので、これだけで公開されます）。
+3. 発行されたNetlifyのURL（お好みでカスタムドメインも設定可）をブックマーク／
+   ホーム画面に追加すると、警告バナーが出ずfavicon・ホーム画面アイコン・タイトルも
+   正しく表示されます。以後はこちらのURLを日常的に使ってください。
+
+ダッシュボード自体の機能は`/exec`を直接開くだけでも完結しており、Netlifyが無くても
+データの送受信・表示には支障ありません。あくまで見た目・利便性のための一手間ですが、
+一度設定すれば以後ずっと快適になるので、面倒でも最初にやっておくことをおすすめします。
+
 ## プロトコル仕様（自前の親機プログラムから送信する場合）
 
 `smm3_main_web.py` 以外の自作プログラムから、このGASへデータを送りたい場合の仕様です。
@@ -243,25 +274,3 @@ URLの取り扱いにはご注意ください（人に送るメッセージや�
 うっかり含めない、等）。第三者に一時的に見せたい場合は、別のデプロイを作成し、不要になったら
 削除することで閲覧をすぐに無効化できます。
 
-## favicon・ホーム画面アイコンについて（任意）
-
-`/exec` を直接開いた場合、ブラウザのタブにはGoogleの汎用アイコンが表示されます。GASの
-Web Appは `script.google.com` → `script.googleusercontent.com` へのリダイレクト/サンドボックス
-経由で配信される都合上、`Dashboard.html` 側で `<link rel="icon">` を書いても反映されません
-（`HtmlService` の `setFaviconUrl()` という専用APIもありますが、SVGを渡すと
-`doGet` が例外を起こして画面全体が表示できなくなるため使えません）。
-
-これを回避したい場合は、[`netlify_shell/`](netlify_shell/) にある最小限の静的ページ
-（`index.html` が `/exec` をiframeで表示するだけの「外枠」）を
-[Netlify](https://www.netlify.com/) 等の無料静的ホスティングにデプロイしてください。
-
-1. `netlify_shell/index.html` を開き、`<iframe src="...">` の
-   `https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec` の部分を、
-   自分の `/exec` URL（上記手順3で控えたもの）に書き換える。
-2. [app.netlify.com](https://app.netlify.com/) にログインし、`netlify_shell/` フォルダを
-   そのままドラッグ＆ドロップでデプロイ（ビルド不要の静的サイトなので、これだけで公開されます）。
-3. 発行されたNetlifyのURL（お好みでカスタムドメインも設定可）をブックマーク／
-   ホーム画面に追加すると、favicon・ホーム画面アイコン・タイトルが正しく表示されます。
-
-この手順はあくまで見た目の改善のための任意項目です。ダッシュボード自体の機能は
-`/exec` を直接開くだけで完結しており、Netlifyが無くても動作します。
