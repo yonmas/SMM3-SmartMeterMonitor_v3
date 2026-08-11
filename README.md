@@ -2,7 +2,7 @@
 
 ## お知らせ（2026/08/11）
 
-- **Webダッシュボードの時間別比較表ロジックに不具合があり修正しました**。`Code.js`と`History.js`の2ファイルを最新版に差し替えてください**（`Dashboard.html`・`appsscript.json`は今回変更なし）。
+- **Webダッシュボードの時間別比較表ロジックに不具合があり修正しました**。`Code.js`と`History.js`の2ファイルを最新版に差し替えてください（`Dashboard.html`・`appsscript.json`は変更なし）。
 
 ---
 
