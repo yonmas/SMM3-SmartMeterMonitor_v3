@@ -197,11 +197,14 @@ function getHealth(now) {
 }
 
 // 30分×48スロット → 1時間×24（smm3_sub_core2.pyのdraw_table相当の集計単位に合わせる）
+// round1で丸める：表示（Dashboard.htmlはtoFixed(1)）と同じ桁数に揃えることで、
+// 「表示されている行を目で足すと合計と合わない」という見た目の矛盾を防ぐ
+// （子機のdraw_table()も同じ理由で1桁丸め後の値を積算している。2026-08-11）
 function toHourly(slots48) {
   var hourly = [];
   for (var h = 0; h < 24; h++) {
     var a = slots48[h * 2], b = slots48[h * 2 + 1];
-    hourly.push((a == null || b == null) ? null : round2(a + b));
+    hourly.push((a == null || b == null) ? null : round1(a + b));
   }
   return hourly;
 }
@@ -214,7 +217,7 @@ function buildTable(todayHourly, avgHourly) {
     var t = todayHourly[h], a = avgHourly[h];
     // 当日(t)が0は「まだ計測されていない（未来の時間帯）」場合と区別できないため、
     // 子機が"---"でごまかしているのと同じ理由で、その時間帯の差は表示しない(null)
-    var diff = (t == null || t === 0 || !a) ? null : round2(t - a);
+    var diff = (t == null || t === 0 || !a) ? null : round1(t - a);
     rows.push({ hour: h, today: t, avg: a, diff: diff });
     // 合計・比率は「今日まだ来ていない時間帯」を両方から除外し、範囲を揃える
     // （smm3_sub_core2.pyのdraw_table()と同じ考え方。旧実装はtotalAvgを24時間フル分で
@@ -228,7 +231,11 @@ function buildTable(todayHourly, avgHourly) {
     }
   }
   var ratio = totalAvg > 0 ? Math.round((totalToday / totalAvg) * 100) : null;
-  return { rows: rows, totalToday: round2(totalToday), totalAvg: round2(totalAvg), ratio: ratio };
+  return { rows: rows, totalToday: round1(totalToday), totalAvg: round1(totalAvg), ratio: ratio };
+}
+
+function round1(v) {
+  return Math.round(v * 10) / 10;
 }
 
 function round2(v) {

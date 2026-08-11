@@ -436,5 +436,8 @@ function avgHourlyProfile(rows, now, days) {
       if (hourly[h] != null) { sums[h] += hourly[h]; counts[h]++; }
     }
   }
-  return sums.map(function (s, h) { return counts[h] ? round2(s / counts[h]) : null; });
+  // round1（Code.js定義）：Dashboard.htmlの表示桁(toFixed(1))に揃える。子機のdraw_table()も
+  // 1桁丸め後の値を積算しているため、「表示行を目で足すと合計と合わない」見た目の矛盾を防ぐ
+  // 目的でここも1桁に統一（2026-08-11）
+  return sums.map(function (s, h) { return counts[h] ? round1(s / counts[h]) : null; });
 }
