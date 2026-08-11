@@ -220,7 +220,9 @@ function buildTable(todayHourly, avgHourly) {
     // （smm3_sub_core2.pyのdraw_table()と同じ考え方。旧実装はtotalAvgを24時間フル分で
     // 合計していたため、日中は「今日は途中まで」÷「平均は24時間分」という範囲不一致で
     // 比率が実態より低く出るバグがあった。2026-08-11修正）
-    if (t != null) {
+    // t===0 も「まだ計測されていない未来の時間帯」のセンチネル（このファイル内のdiff計算と
+    // 同じ判定基準）。t!=nullだけだと48スロット配列の未来分が0埋めのため素通りしてしまう。
+    if (t != null && t !== 0) {
       totalToday += t;
       if (a) totalAvg += a;
     }
