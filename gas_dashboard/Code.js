@@ -216,8 +216,14 @@ function buildTable(todayHourly, avgHourly) {
     // 子機が"---"でごまかしているのと同じ理由で、その時間帯の差は表示しない(null)
     var diff = (t == null || t === 0 || !a) ? null : round2(t - a);
     rows.push({ hour: h, today: t, avg: a, diff: diff });
-    if (t != null) totalToday += t;
-    if (a) totalAvg += a;
+    // 合計・比率は「今日まだ来ていない時間帯」を両方から除外し、範囲を揃える
+    // （smm3_sub_core2.pyのdraw_table()と同じ考え方。旧実装はtotalAvgを24時間フル分で
+    // 合計していたため、日中は「今日は途中まで」÷「平均は24時間分」という範囲不一致で
+    // 比率が実態より低く出るバグがあった。2026-08-11修正）
+    if (t != null) {
+      totalToday += t;
+      if (a) totalAvg += a;
+    }
   }
   var ratio = totalAvg > 0 ? Math.round((totalToday / totalAvg) * 100) : null;
   return { rows: rows, totalToday: round2(totalToday), totalAvg: round2(totalAvg), ratio: ratio };
