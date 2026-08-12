@@ -157,7 +157,27 @@ function seedTestInstLog() {
 }
 
 function readInstLogTestRows(tailRows) {
-  return readInstLogSheetTail(getInstLogTestSheet(), tailRows);
+  return shiftToRecent(readInstLogSheetTail(getInstLogTestSheet(), tailRows));
+}
+
+// テストデータはseedTestInstLog()実行時のnowに時刻が固定されたまま進まないため、
+// 末尾が「今日」に見えるよう日単位でシフトして返す（実データ経路readInstLogRowsには
+// 適用しない、readInstLogTestRowsからのみ呼ぶ）。
+// これを怠ると、末尾の時刻がDate.now()から乖離し続け、Dashboard.html側の
+// pollInstLog()が「1時間以上更新が無い＝親機停止」と誤判定して30秒毎にloadSource()
+// （重い全件再取得）を呼び直す無限ループになる（2026-08-12発見）。
+// 日単位に丸めるのは、生成時に埋め込んだ時刻ごとの疑似的な昼夜カーブ(sin波)の位相を
+// 保ったまま、日付だけを新しく見せるため。
+function shiftToRecent(result) {
+  var points = result.points;
+  if (!points || points.length === 0) return result;
+  var lastT = points[points.length - 1][0];
+  var dayMs = 24 * 60 * 60 * 1000;
+  var offsetDays = Math.round((Date.now() - lastT) / dayMs);
+  if (offsetDays === 0) return result;
+  var offset = offsetDays * dayMs;
+  var shifted = points.map(function (p) { return [p[0] + offset, p[1]]; });
+  return { points: shifted, truncated: result.truncated };
 }
 
 function getHistorySheet() {
