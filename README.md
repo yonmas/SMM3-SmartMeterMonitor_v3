@@ -1,5 +1,11 @@
 # SMM3 : Smart Meter Monitor v.3
 
+## お知らせ（2026/08/14）
+
+- **Webダッシュボードのスクリプト配布方式を変更しました**。単体GASプロジェクトでの配布から、設定用GSSに同梱する方式に変更しました。**既に導入・設定済みの場合、この変更に伴う作業は不要です**。詳細は[gas_dashboard/README.md](gas_dashboard/README.md)参照。
+
+---
+
 ## お知らせ（2026/08/11）
 
 - **Webダッシュボードの時間別比較表ロジックに不具合があり修正しました**。`Code.js`と`History.js`の2ファイルを最新版に差し替えてください（`Dashboard.html`・`appsscript.json`は変更なし）。
@@ -138,15 +144,8 @@ Ambient でアカウントを作成し、チャネルを作成。チャネルID�
   +- config_main.json (オプション：親機設定ファイル。smm3_main_web.py を使う場合は WEB_GAS_URL も設定。config_files/config_main.json のサンプル参照)
 ```
 
-`smm3_main_web.py` を使う場合は、加えて以下が必要です（**[7.Webダッシュボード]** 参照）。
-```text
-■■ Webダッシュボード（オプション、smm3_main_web.py を使う場合のみ） ■■
-
-gas_dashboard/
-  +- Code.js / History.js / Dashboard.html / appsscript.json
-  （Google Apps Script のプロジェクトへコピーしてご自身のGoogleアカウントでデプロイ。
-    発行されたデプロイID（`AKfycb...`）を config_main.json の WEB_GAS_URL に設定してください。）
-```
+Webダッシュボードを利用する場合は、スクリプトを同梱した設定用GSS（下記
+**[5.初期設定]** Step-1）の自身のGoogleアカウントへのコピーが必要です。詳しくは **[7.Webダッシュボード]** 参照。
 
 ```text
 ■■ 子機(sub)：M5Stack Basic/Core2 ■■ 
@@ -196,10 +195,10 @@ gas_dashboard/
 
 ## 5. 初期設定
 
-Step-1. [設定用Googleスプレッドシート（設定用GSS）の準備とGoogle Sheets APIの取得（SMM_config）](https://docs.google.com/spreadsheets/d/1qYsY8ZOpj6FxqoebCQnvBFYSL8rCK7r_A7R3m9bF7MY/edit#gid=2004069989)  
+Step-1. [設定用Googleスプレッドシート（設定用GSS）の準備とGoogle Sheets APIの取得（SMM_config）](https://docs.google.com/spreadsheets/d/1qYsY8ZOpj6FxqoebCQnvBFYSL8rCK7r_A7R3m9bF7MY/edit#gid=2004069989)（Webダッシュボードのスクリプトも同梱されています）  
 Step-2. [設定用GSSのAPI設定読み込み（SMM_API_config）](https://docs.google.com/spreadsheets/d/1MmbDpG4GTfwRiHsFgsJ89XaIqkVF537lReL4glnOHuc/edit#gid=276533579)  
 　※ それぞれリンク先の説明を参照してください。  
-Step-3.（`smm3_main_web.py` を使う場合のみ）Webダッシュボード（Google Apps Script）をデプロイし、発行されたURLを設定してください。**[7.Webダッシュボード]** 参照。
+Step-3. Webダッシュボードを使う場合は、Step-1で設定用GSSに同梱されているダッシュボードのスクリプトをデプロイし、発行されたURLを設定してください。**[7.Webダッシュボード]** 参照。
 
 ## 6. ボタンの説明
 
@@ -226,14 +225,12 @@ Step-3.（`smm3_main_web.py` を使う場合のみ）Webダッシュボード（
 - **異常の検知**：親機からのデータが10分以上途絶えると、画面全体が赤くなり警告バナーが出ます。設定は不要です。
 - **設定ページ**：タブ右端の歯車から、警告アンペアの変更と契約アンペアの確認ができます。契約アンペアは親機が起動時に送ってくる値を表示します（変更は設定用スプレッドシートから）。
 
-**[サンプルを見る（固定データ）](https://smm3-sample.netlify.app)** ← 実機無しで見た目を試せます。数値・週/月グラフはある時点の実データのスナップショットで固定表示、瞬時グラフはテスト用の合成データです（実際の稼働状況ではありません、設定の変更もできません）。
+**[サンプルを見る（固定データ）](https://smm3-sample.netlify.app)** ← 実機無しで見た目を試せます。数値・週/月グラフはある時点の実データのスナップショットで固定表示、瞬時グラフはテスト用の合成データです（実際の稼働状況ではありません、設定の変更もできません）。ダッシュボードのスクリプトは設定用GSS（**[5.初期設定]** Step-1）に同梱されています。
 
-セットアップ手順（GASプロジェクトの作成からデプロイ、Netlifyでの公開まで）は
-**[gas_dashboard/README.md](gas_dashboard/README.md)** にまとめました。ファイルを1つずつ
-コピー＆ペーストするのが面倒な場合は、同READMEで紹介しているテンプレートのコピーから
-始める方法（手順を大幅に省略できます）もご検討ください。
+デプロイ手順・Netlifyでの公開方法は **[gas_dashboard/README.md](gas_dashboard/README.md)**
+にまとめました。SMM3本体を使わずGASスクリプト単体だけが必要な場合も、同READMEを参照してください。
 
-閲覧用URLの扱いに関する注意点（第三者に見えてしまう設定であること）も上記READMEに記載しています。
+閲覧用URLにはアクセス制限をかけていません。必要であれば各自で設定をお願いします。
 
 ## 8. Ambient対応（オプション）
 
