@@ -2,7 +2,7 @@
 
 ## お知らせ（2026/08/14）
 
-- **Webダッシュボードのスクリプト配布方式を変更しました**。単体GASプロジェクトでの配布から、設定用GSSに同梱する方式に変更しました。**既に導入・設定済みの場合、この変更に伴う作業は不要です**。詳細は[gas_dashboard/README.md](gas_dashboard/README.md)参照。
+- **Webダッシュボードのスクリプト配布方式を変更しました**。単体GASプロジェクトでの配布から、[設定用GSS](https://docs.google.com/spreadsheets/d/1qYsY8ZOpj6FxqoebCQnvBFYSL8rCK7r_A7R3m9bF7MY/edit#gid=2004069989)に同梱する方式に変更しました。**既に導入・設定済みの場合、この変更に伴う作業は不要です**。詳細は[gas_dashboard/README.md](gas_dashboard/README.md)参照。
 
 ---
 
