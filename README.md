@@ -195,7 +195,7 @@ Webダッシュボードを利用する場合は、スクリプトを同梱し�
 
 ## 5. 初期設定
 
-Step-1. [設定用Googleスプレッドシート（設定用GSS）の準備とGoogle Sheets APIの取得（SMM_config）](https://docs.google.com/spreadsheets/d/1qYsY8ZOpj6FxqoebCQnvBFYSL8rCK7r_A7R3m9bF7MY/edit#gid=2004069989)（Webダッシュボードのスクリプトも同梱されています）  
+Step-1. [設定用Googleスプレッドシート（設定用GSS）の準備とGoogle Sheets APIの取得（SMM_config）](https://docs.google.com/spreadsheets/d/1qYsY8ZOpj6FxqoebCQnvBFYSL8rCK7r_A7R3m9bF7MY/copy)（クリックで「ドキュメントのコピー」画面が開きます。「コピーを作成」を押して、シートとスクリプトを自分のアカウントにコピーしてください）  
 Step-2. [設定用GSSのAPI設定読み込み（SMM_API_config）](https://docs.google.com/spreadsheets/d/1MmbDpG4GTfwRiHsFgsJ89XaIqkVF537lReL4glnOHuc/edit#gid=276533579)  
 　※ それぞれリンク先の説明を参照してください。  
 Step-3. Webダッシュボードを使う場合は、Step-1で設定用GSSに同梱されているダッシュボードのスクリプトをデプロイし、発行されたURLを設定してください。**[7.Webダッシュボード]** 参照。
